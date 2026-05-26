@@ -1,0 +1,31 @@
+[package]
+name         = "y7ke-storage"
+description  = "SQLite persistence, master-DEK file, and field encryption for Y7KE."
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+y7ke-core = { workspace = true }
+
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+uuid       = { workspace = true }
+async-trait = { workspace = true }
+
+sqlx        = { workspace = true }
+directories = { workspace = true }
+rand        = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio    = { workspace = true, features = ["macros", "rt-multi-thread"] }

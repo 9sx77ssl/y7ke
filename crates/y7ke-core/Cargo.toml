@@ -1,0 +1,34 @@
+[package]
+name         = "y7ke-core"
+description  = "Shared types, errors, IDs, events, and cryptographic primitives for Y7KE."
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+uuid       = { workspace = true }
+blake3     = { workspace = true }
+bs58       = { workspace = true }
+zeroize    = { workspace = true }
+
+# Crypto primitives.
+ed25519-dalek    = { workspace = true, features = ["rand_core", "zeroize"] }
+x25519-dalek     = { workspace = true, features = ["zeroize"] }
+chacha20poly1305 = { workspace = true }
+hkdf             = { workspace = true }
+sha2             = { workspace = true }
+rand             = { workspace = true }
+rand_core        = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"

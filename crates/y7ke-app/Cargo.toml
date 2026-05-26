@@ -1,0 +1,30 @@
+[package]
+name         = "y7ke-app"
+description  = "Composition root tying y7ke-core/storage/net together; exposes a Tauri-friendly API and a headless harness binary."
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+y7ke-core    = { workspace = true }
+y7ke-storage = { workspace = true }
+y7ke-net     = { workspace = true }
+
+tokio              = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+thiserror          = { workspace = true }
+anyhow             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait        = { workspace = true }
+
+[dev-dependencies]
+tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
+tempfile = "3"

@@ -1,0 +1,42 @@
+[package]
+name         = "y7ke-net"
+description  = "libp2p swarm, session handshake, and offline sync protocol for Y7KE."
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+y7ke-core    = { workspace = true }
+y7ke-storage = { workspace = true }
+
+tokio       = { workspace = true }
+futures     = { workspace = true }
+async-trait = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+bincode     = { workspace = true, features = ["serde"] }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+uuid        = { workspace = true }
+
+libp2p = { workspace = true, features = [
+    "tokio",
+    "tcp",
+    "noise",
+    "yamux",
+    "mdns",
+    "ping",
+    "identify",
+    "request-response",
+    "macros",
+] }
+
+[dev-dependencies]
+tokio              = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tracing-subscriber = { workspace = true }
