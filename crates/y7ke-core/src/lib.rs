@@ -1,3 +1,14 @@
 //! Shared types, errors, IDs, events, and cryptographic primitives for Y7KE.
 //!
-//! Modules are added as features are implemented; see `docs/ROADMAP.md`.
+//! Every other Y7KE crate depends on this one. Keep it small and stable.
+
+pub mod crypto;
+pub mod error;
+pub mod event;
+pub mod id;
+pub mod status;
+
+pub use error::{AppError, Result};
+pub use event::AppEvent;
+pub use id::{ConversationId, MessageId, Y7Id};
+pub use status::{ConnectionKind, ContactStatus, MessageStatus, RequestResolution};
