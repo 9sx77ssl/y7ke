@@ -5,8 +5,8 @@ members  = [
     "crates/y7ke-storage",
     "crates/y7ke-net",
     "crates/y7ke-app",
+    "src-tauri",
 ]
-# src-tauri is added once the Tauri shell is scaffolded.
 
 [workspace.package]
 version      = "0.1.0"
