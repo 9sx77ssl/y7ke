@@ -13,7 +13,8 @@ const EVENT_CHANNEL: &str = "y7ke://event";
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,y7ke=debug")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,y7ke=debug,y7ke_ui=debug")),
         )
         .init();
 
@@ -91,8 +92,10 @@ fn main() {
             commands::accept_request,
             commands::reject_request,
             commands::cancel_request,
+            commands::delete_contact,
             commands::list_messages,
             commands::send_message,
+            commands::log_from_ui,
         ])
         .run(tauri::generate_context!());
 

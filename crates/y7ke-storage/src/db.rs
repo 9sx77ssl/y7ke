@@ -131,6 +131,47 @@ impl Db {
     pub fn peer_state(&self) -> dao::peer_state::PeerStateDao<'_> {
         dao::peer_state::PeerStateDao::new(&self.pool)
     }
+
+    /// Wipe ALL local state for `peer`: messages, session, contact, requests,
+    /// sync_queue, peer_state. Used by delete-chat.
+    pub async fn wipe_peer(
+        &self,
+        peer: &y7ke_core::Y7Id,
+        conv: &y7ke_core::ConversationId,
+    ) -> Result<()> {
+        let peer_uri = peer.to_uri();
+        sqlx::query("DELETE FROM messages WHERE conversation_id = ?")
+            .bind(&conv.as_bytes()[..])
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe messages: {e}")))?;
+        sqlx::query("DELETE FROM sessions WHERE peer_y7_id = ?")
+            .bind(&peer_uri)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe sessions: {e}")))?;
+        sqlx::query("DELETE FROM sync_queue WHERE target_peer_y7_id = ?")
+            .bind(&peer_uri)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe sync_queue: {e}")))?;
+        sqlx::query("DELETE FROM requests WHERE peer_y7_id = ?")
+            .bind(&peer_uri)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe requests: {e}")))?;
+        sqlx::query("DELETE FROM contacts WHERE y7_id = ?")
+            .bind(&peer_uri)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe contacts: {e}")))?;
+        sqlx::query("DELETE FROM peer_state WHERE peer_y7_id = ?")
+            .bind(&peer_uri)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::storage(format!("wipe peer_state: {e}")))?;
+        Ok(())
+    }
 }
 
 pub fn now_ms() -> i64 {

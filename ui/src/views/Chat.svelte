@@ -9,10 +9,14 @@
     openConversation,
     sendText,
   } from "../lib/stores/chat.svelte";
-  import { findContact } from "../lib/stores/contacts.svelte";
+  import { deleteContactAction, findContact } from "../lib/stores/contacts.svelte";
   import { getPresence, presenceLabel } from "../lib/stores/presence.svelte";
+  import { openEmpty } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
+  import { toast } from "../lib/components/toast.svelte";
+  import { log } from "../lib/log";
   import Button from "../lib/components/Button.svelte";
+  import IconButton from "../lib/components/IconButton.svelte";
   import KeyDisplay from "../lib/components/KeyDisplay.svelte";
   import MessageBubble from "../lib/components/MessageBubble.svelte";
   import StatusDot from "../lib/components/StatusDot.svelte";
@@ -25,16 +29,17 @@
   }
 
   let { peerY7Id }: Props = $props();
+  const logger = log("Chat");
 
   let composer = $state("");
   let scrollEl = $state<HTMLDivElement | undefined>(undefined);
   let lastSeenCount = 0;
 
-  // Re-open the conversation when the peer changes.
+  // B4: always re-open on mount or peer change. Store state can be stale
+  // across route navigations.
   $effect(() => {
-    if (chat.peerY7Id !== peerY7Id) {
-      void openConversation(peerY7Id);
-    }
+    logger.debug("opening conversation", peerY7Id);
+    void openConversation(peerY7Id);
   });
 
   // Auto-scroll to bottom whenever a new message appears or we just opened.
@@ -62,7 +67,25 @@
     const text = composer.trim();
     if (text.length === 0 || chat.sending) return;
     composer = "";
+    logger.debug("sending message", { to: peerY7Id, len: text.length });
     await sendText(text);
+  }
+
+  async function onDelete(): Promise<void> {
+    const ok = window.confirm(
+      "delete this chat forever? messages, session, and contact will be wiped on this device and the peer will be notified to wipe theirs.",
+    );
+    if (!ok) return;
+    logger.info("deleting contact", peerY7Id);
+    try {
+      await deleteContactAction(peerY7Id);
+      toast.success("chat deleted");
+      openEmpty();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("delete failed", msg);
+      toast.error(`delete failed: ${msg}`);
+    }
   }
 
   function handleKeydown(ev: KeyboardEvent): void {
@@ -97,11 +120,29 @@
       </span>
       <span class="presence">{presenceLabel(presence).toLowerCase()}</span>
     </div>
-    {#if hasNickname}
-      <div class="head-key">
+    <div class="head-right">
+      {#if hasNickname}
         <KeyDisplay value={peerY7Id} layout="inline" truncate />
-      </div>
-    {/if}
+      {/if}
+      <IconButton
+        tone="danger"
+        size={28}
+        ariaLabel="delete chat"
+        title="delete this chat forever"
+        onclick={onDelete}
+      >
+        <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true">
+          <path
+            d="M3 4h8M5 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M4 4l.6 7a1 1 0 0 0 1 .9h2.8a1 1 0 0 0 1-.9L10 4M6 7v3M8 7v3"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+      </IconButton>
+    </div>
   </header>
 
   <div class="scroll" bind:this={scrollEl}>
@@ -206,11 +247,12 @@
     letter-spacing: 0.04em;
     white-space: nowrap;
   }
-  .head-key {
+  .head-right {
     flex-shrink: 0;
-    max-width: 240px;
-    min-width: 0;
     display: flex;
+    align-items: center;
+    gap: var(--y7-sp-2);
+    min-width: 0;
   }
 
   .scroll {

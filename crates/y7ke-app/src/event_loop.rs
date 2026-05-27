@@ -67,6 +67,8 @@ async fn dispatch(
         }
         NetEvent::ConnectionEstablished { peer, kind } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
+                inner.presence.write().await.insert(y7, kind);
+                tracing::debug!(%y7, ?kind, "connection established → presence cached");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: kind,
@@ -79,6 +81,12 @@ async fn dispatch(
         }
         NetEvent::ConnectionClosed { peer } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
+                inner
+                    .presence
+                    .write()
+                    .await
+                    .insert(y7, ConnectionKind::Offline);
+                tracing::debug!(%y7, "connection closed → presence offline");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: ConnectionKind::Offline,
@@ -255,9 +263,21 @@ async fn handle_msg(
         .await?
         .ok_or_else(|| AppError::network(format!("no session for {sender_y7}")))?;
 
-    // Verify + decrypt.
     let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
-    let text = messaging::open_envelope(&envelope, &verifying, &session.session_key)?;
+    let kind = messaging::open_envelope(&envelope, &verifying, &session.session_key)?;
+
+    // Control payloads don't land in `messages` — dispatch inline.
+    let text = match kind {
+        messaging::PlaintextKind::Text(t) => t,
+        messaging::PlaintextKind::Control(ctrl) => {
+            handle_control(inner, event_tx, sender_y7, ctrl).await?;
+            inner
+                .net
+                .respond_msg_take(channel, MsgResp { ack: true })
+                .await?;
+            return Ok(());
+        }
+    };
 
     let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
 
@@ -284,17 +304,19 @@ async fn handle_msg(
         .respond_msg_take(channel, MsgResp { ack: true })
         .await?;
 
-    // Auto-promote: if our contact for the sender is still pending (because
-    // we sent the request and they haven't messaged us back yet, or because
-    // we received their handshake but they hadn't explicitly chosen Accept),
-    // the fact that they're now sending us an actual message is the practical
-    // signal that the relationship is two-way. Promote to Accepted and
-    // resolve any still-pending requests with them.
+    // Auto-promote — only for OUR outgoing requests. If we initiated the
+    // request (our contact = pending_out) and the peer just sent us a
+    // message, that's the practical signal they accepted us; resolve the
+    // outgoing request and promote the contact.
+    //
+    // We deliberately do NOT promote pending_in. That status means the peer
+    // initiated the handshake and we haven't manually accepted yet — letting
+    // their messages auto-promote us would bypass the user's accept/reject
+    // gate. Messages from pending_in peers are still stored (the user can
+    // review them by clicking the pending contact in the sidebar) but the
+    // contact stays gated until accept_request is called.
     if let Some(contact) = inner.db.contacts().get(&sender_y7).await? {
-        if matches!(
-            contact.status,
-            y7ke_core::ContactStatus::PendingOut | y7ke_core::ContactStatus::PendingIn
-        ) {
+        if matches!(contact.status, y7ke_core::ContactStatus::PendingOut) {
             inner
                 .db
                 .contacts()
@@ -519,4 +541,52 @@ pub fn next_retry_at(attempts: i64) -> i64 {
     let secs = (1i64 << attempts.min(7)) * 30; // 30s, 60s, 120s, 240s, 480s, ...
     let capped = secs.min(3600);
     now + capped * 1000
+}
+
+/// Apply a control payload received from `sender`.
+async fn handle_control(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    sender: Y7Id,
+    ctrl: messaging::ControlPayload,
+) -> Result<()> {
+    tracing::info!(%sender, ?ctrl, "control received");
+    match ctrl {
+        messaging::ControlPayload::RejectedRequest => {
+            // Mark outgoing request as Rejected, contact as Blocked.
+            for r in inner.db.requests().list_pending(None).await? {
+                if r.peer_y7_id == sender {
+                    let _ = inner
+                        .db
+                        .requests()
+                        .resolve(r.id, y7ke_core::RequestResolution::Rejected)
+                        .await;
+                }
+            }
+            inner
+                .db
+                .contacts()
+                .update_status(&sender, y7ke_core::ContactStatus::Blocked)
+                .await
+                .ok();
+            let _ = event_tx.send(AppEvent::RequestResolved {
+                y7_id: sender.to_uri(),
+                resolution: y7ke_core::RequestResolution::Rejected,
+            });
+        }
+        messaging::ControlPayload::ChatDeleted => {
+            // Peer wiped the conversation; mirror locally.
+            wipe_conversation(inner, &sender).await?;
+            let _ = event_tx.send(AppEvent::ContactAdded {
+                y7_id: sender.to_uri(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Wipe local state for `peer` via the storage DAO.
+pub(crate) async fn wipe_conversation(inner: &Arc<AppInner>, peer: &Y7Id) -> Result<()> {
+    let conv = ConversationId::between(&inner.my_y7_id, peer);
+    inner.db.wipe_peer(peer, &conv).await
 }

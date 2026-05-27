@@ -1,7 +1,7 @@
 // Contacts store — the source of truth for the sidebar list. Refreshes on
 // demand from `list_contacts` and reacts to contact_added events.
 
-import { listContacts } from "../bridge";
+import { deleteContact as rpcDelete, listContacts } from "../bridge";
 import type { ContactView } from "../types";
 import { seedPresence } from "./presence.svelte";
 
@@ -76,4 +76,9 @@ export function applyContactAdded(_y7Id: string): void {
 
 export function findContact(y7Id: string): ContactView | undefined {
   return state.items.find((c) => c.y7_id === y7Id);
+}
+
+export async function deleteContactAction(y7Id: string): Promise<void> {
+  await rpcDelete(y7Id);
+  await refreshContacts();
 }

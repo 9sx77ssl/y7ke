@@ -78,6 +78,23 @@ export function cancelRequest(requestId: number): Promise<void> {
   return call<void>("cancel_request", { requestId });
 }
 
+export function deleteContact(y7Id: string): Promise<void> {
+  return call<void>("delete_contact", { y7Id });
+}
+
+// ── Logging ─────────────────────────────────────────────────────────────────
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
+
+export function logToBackend(
+  level: LogLevel,
+  target: string,
+  message: string,
+): void {
+  // Fire-and-forget; we don't want UI logs to throw if the bridge is offline.
+  void call("log_from_ui", { level, target, message }).catch(() => {});
+}
+
 // ── Messages ────────────────────────────────────────────────────────────────
 
 export function listMessages(

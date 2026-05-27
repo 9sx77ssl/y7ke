@@ -31,6 +31,10 @@ pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// both send and receive paths to bound memory usage from adversarial peers.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
+/// Wire timeout for a single send_msg attempt. Past this we mark Failed +
+/// enqueue retry so the UI never sits on "sending…" forever.
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Best-effort RSS reading via `/proc/self/status`. Returns `None` on
 /// non-Linux or when the file can't be parsed. Used only for boot telemetry.
 fn process_rss_kb() -> Option<u64> {
@@ -77,6 +81,12 @@ pub(crate) struct AppInner {
     pub me: SigningKey,
     pub my_pubkey: [u8; 32],
     pub my_y7_id: Y7Id,
+    /// Live presence cache, populated by the event loop from
+    /// ConnectionEstablished / ConnectionClosed. Read by `list_contacts`
+    /// so the snapshot returned to the UI carries fresh status even
+    /// though `presence_changed` events fired before the UI listener
+    /// registered (boot race).
+    pub presence: tokio::sync::RwLock<std::collections::HashMap<Y7Id, ConnectionKind>>,
 }
 
 /// The single public handle the Tauri shell holds.
@@ -108,6 +118,7 @@ impl AppHandle {
             me: local.signing_key,
             my_pubkey,
             my_y7_id,
+            presence: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -251,6 +262,7 @@ impl AppHandle {
 
     pub async fn reject_request(&self, id: i64) -> Result<()> {
         let pending = self.find_request(id).await?;
+        let peer = pending.peer_y7_id;
         self.inner
             .db
             .requests()
@@ -259,13 +271,59 @@ impl AppHandle {
         self.inner
             .db
             .contacts()
-            .update_status(&pending.peer_y7_id, ContactStatus::Blocked)
+            .update_status(&peer, ContactStatus::Blocked)
             .await?;
+        // Notify the initiator (best-effort; session always exists since handshake ran).
+        self.send_control(&peer, messaging::ControlPayload::RejectedRequest)
+            .await;
         let _ = self.event_tx.send(AppEvent::RequestResolved {
-            y7_id: pending.peer_y7_id.to_uri(),
+            y7_id: peer.to_uri(),
             resolution: RequestResolution::Rejected,
         });
         Ok(())
+    }
+
+    /// Wipe a conversation locally and notify the peer to wipe theirs.
+    pub async fn delete_contact(&self, peer: Y7Id) -> Result<()> {
+        // Notify first (uses live session). Then wipe — including the session.
+        self.send_control(&peer, messaging::ControlPayload::ChatDeleted)
+            .await;
+        event_loop::wipe_conversation(&self.inner, &peer).await?;
+        let _ = self.event_tx.send(AppEvent::RequestResolved {
+            y7_id: peer.to_uri(),
+            resolution: RequestResolution::Cancelled,
+        });
+        Ok(())
+    }
+
+    /// Fire-and-forget control message via /y7ke/msg/1.0.0. Failures logged, not raised.
+    async fn send_control(&self, peer: &Y7Id, payload: messaging::ControlPayload) {
+        let Some(session) = self.inner.db.sessions().get(peer).await.ok().flatten() else {
+            tracing::debug!(%peer, "no session for control — skipping");
+            return;
+        };
+        let Ok((_mid, envelope, _ts)) = messaging::seal_control(
+            &self.inner.me,
+            &self.inner.my_pubkey,
+            &session.session_key,
+            &payload,
+        ) else {
+            tracing::warn!(%peer, "seal_control failed");
+            return;
+        };
+        let Ok(peer_id) = peer_id_from_y7(peer) else {
+            return;
+        };
+        let req = y7ke_net::protocol::MsgReq { envelope };
+        let fut = self.inner.net.send_msg(peer_id, req);
+        match tokio::time::timeout(SEND_TIMEOUT, fut).await {
+            Ok(Ok(resp)) if resp.ack => {
+                tracing::debug!(%peer, ?payload, "control delivered");
+            }
+            other => {
+                tracing::warn!(%peer, ?other, "control delivery failed (peer may be offline)");
+            }
+        }
     }
 
     /// Cancel a pending OUTGOING request. The local request row resolves as
@@ -314,6 +372,7 @@ impl AppHandle {
 
     pub async fn list_contacts(&self) -> Result<Vec<ContactView>> {
         let rows = self.inner.db.contacts().list().await?;
+        let presence_map = self.inner.presence.read().await;
         Ok(rows
             .into_iter()
             .map(|c| ContactView {
@@ -321,7 +380,10 @@ impl AppHandle {
                 nickname: c.nickname,
                 status: c.status,
                 added_at: c.added_at,
-                presence: ConnectionKind::Offline,
+                presence: presence_map
+                    .get(&c.y7_id)
+                    .copied()
+                    .unwrap_or(ConnectionKind::Offline),
             })
             .collect())
     }
@@ -364,7 +426,6 @@ impl AppHandle {
             let session = self.inner.db.sessions().get(&session_owner).await?;
             let text = match session {
                 Some(s) => {
-                    // Verify + decrypt for the UI.
                     let verifying = y7ke_core::crypto::VerifyingKey::from_bytes(&m.sender_pub)?;
                     let envelope = y7ke_net::protocol::MessageEnvelope {
                         message_id: *m.message_id.as_bytes(),
@@ -374,8 +435,11 @@ impl AppHandle {
                         ciphertext: m.payload_enc.clone(),
                         sig: m.sig,
                     };
-                    messaging::open_envelope(&envelope, &verifying, &s.session_key)
-                        .unwrap_or_else(|_| "<decryption failed>".into())
+                    match messaging::open_envelope(&envelope, &verifying, &s.session_key) {
+                        Ok(messaging::PlaintextKind::Text(t)) => t,
+                        Ok(messaging::PlaintextKind::Control(_)) => continue, // control msgs aren't displayed
+                        Err(_) => "<decryption failed>".into(),
+                    }
                 }
                 None => "<no session>".into(),
             };
@@ -442,11 +506,9 @@ impl AppHandle {
             .await?;
 
         let req = y7ke_net::protocol::MsgReq { envelope };
-        match self.inner.net.send_msg(peer_id, req).await {
-            Ok(resp) if resp.ack => {
-                // M1: peer ack means both sides hold the row — go straight to
-                // `Synced`. Without this we'd be stuck at `Sent` forever in V1
-                // since the explicit SyncReq::Ack flow is never initiated.
+        let send_fut = self.inner.net.send_msg(peer_id, req);
+        match tokio::time::timeout(SEND_TIMEOUT, send_fut).await {
+            Ok(Ok(resp)) if resp.ack => {
                 self.inner
                     .db
                     .messages()
@@ -457,14 +519,24 @@ impl AppHandle {
                     status: MessageStatus::Synced,
                 });
             }
-            _ => {
-                // Could not push live — enqueue for retry on next reconnect.
+            other => {
+                // Timeout or transport error → queue + Failed; retry on reconnect.
+                tracing::warn!(?other, %to, "send_msg failed; enqueuing");
                 let next = event_loop::next_retry_at(0);
                 self.inner
                     .db
                     .sync_queue()
                     .enqueue(&message_id, &to, next)
                     .await?;
+                self.inner
+                    .db
+                    .messages()
+                    .update_status(&message_id, MessageStatus::Failed)
+                    .await?;
+                let _ = self.event_tx.send(AppEvent::MessageStatusChanged {
+                    message_id: message_id.to_string(),
+                    status: MessageStatus::Failed,
+                });
             }
         }
 

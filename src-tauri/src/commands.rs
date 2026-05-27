@@ -57,6 +57,25 @@ pub async fn cancel_request(app: State<'_, AppState>, request_id: i64) -> Result
     app.cancel_request(request_id).await.map_err(err)
 }
 
+#[tauri::command]
+pub async fn delete_contact(app: State<'_, AppState>, y7_id: String) -> Result<(), String> {
+    let peer = Y7Id::parse_strict(&y7_id).map_err(err)?;
+    app.delete_contact(peer).await.map_err(err)
+}
+
+/// Frontend → backend log forwarder. Levels: "trace" | "debug" | "info" | "warn" | "error".
+#[tauri::command]
+pub fn log_from_ui(level: String, target: String, message: String) {
+    match level.as_str() {
+        "trace" => tracing::trace!(target: "y7ke_ui", %target, "{message}"),
+        "debug" => tracing::debug!(target: "y7ke_ui", %target, "{message}"),
+        "info" => tracing::info!(target: "y7ke_ui", %target, "{message}"),
+        "warn" => tracing::warn!(target: "y7ke_ui", %target, "{message}"),
+        "error" => tracing::error!(target: "y7ke_ui", %target, "{message}"),
+        _ => tracing::info!(target: "y7ke_ui", %target, "{message}"),
+    }
+}
+
 /// The UI sends the peer's y7 URI as the conversation argument (the UI does
 /// not know the 16-byte conversation digest). We derive it server-side.
 #[tauri::command]
