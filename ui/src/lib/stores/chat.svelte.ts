@@ -50,6 +50,12 @@ const state = $state<ChatState>({
 // placeholder that sendText added during the await window.
 let loadGen = 0;
 
+// Status updates can arrive before sendText has swapped the placeholderId for
+// the realId — Rust's `push_one` runs in tokio::spawn and may ack before the
+// JS-side invoke() promise resolves. Buffer any update whose message_id we
+// don't currently hold; sendText's swap-success path drains the buffer.
+const pendingStatus = new Map<string, MessageStatus>();
+
 export const chat = {
   get peerY7Id(): string | null {
     return state.peerY7Id;
@@ -158,16 +164,37 @@ export async function sendText(text: string): Promise<void> {
   try {
     const realId = await rpcSendMessage(peer, trimmed);
     // Replace placeholder; do not re-sort because we appended at the tail and
-    // server-side timestamps are within ms of Date.now().
-    state.messages = state.messages.map((m) =>
-      m.message_id === placeholderId ? { ...m, message_id: realId } : m,
-    );
+    // server-side timestamps are within ms of Date.now(). Only touch state if
+    // we're still on the same peer — otherwise the map runs over the wrong
+    // conversation (harmless no-op) and would also dirty state.sending.
+    if (state.peerY7Id === peer) {
+      // Swap placeholderId → realId; if a MessageStatusChanged for realId
+      // arrived in the gap between insert+ack and the invoke() resolving,
+      // apply it now so the bubble doesn't sit on Sending forever.
+      const buffered = pendingStatus.get(realId);
+      pendingStatus.delete(realId);
+      state.messages = state.messages.map((m) => {
+        if (m.message_id !== placeholderId) return m;
+        return {
+          ...m,
+          message_id: realId,
+          status: buffered ?? m.status,
+        };
+      });
+    }
   } catch (err) {
-    state.error = err instanceof Error ? err.message : String(err);
-    state.messages = state.messages.map((m) =>
-      m.message_id === placeholderId ? { ...m, status: MSG_FAILED } : m,
-    );
+    // Only surface the error on the conversation that triggered the send;
+    // otherwise it bleeds into whichever chat the user switched to.
+    if (state.peerY7Id === peer) {
+      state.error = err instanceof Error ? err.message : String(err);
+      state.messages = state.messages.map((m) =>
+        m.message_id === placeholderId ? { ...m, status: MSG_FAILED } : m,
+      );
+    }
   } finally {
+    // `sending` is the global send-in-flight flag; always release it. We must
+    // not gate it on the peer matching, or a peer-switch mid-send would leave
+    // Bob's composer disabled until Alice's RPC eventually resolves.
     state.sending = false;
   }
 }
@@ -213,7 +240,20 @@ export function applyMessageReceived(payload: {
 
 /** Event dispatch — message_status_changed. */
 export function applyMessageStatus(messageId: string, status: MessageStatus): void {
-  state.messages = state.messages.map((m) =>
-    m.message_id === messageId ? { ...m, status } : m,
-  );
+  let matched = false;
+  state.messages = state.messages.map((m) => {
+    if (m.message_id !== messageId) return m;
+    matched = true;
+    return { ...m, status };
+  });
+  if (!matched) {
+    // Likely a status event that beat sendText's placeholder→realId swap.
+    // Stash it so the swap can pick it up. Capped at a small size to keep
+    // the leak bounded if a peer somehow generates spurious status events.
+    if (pendingStatus.size > 64) {
+      const oldest = pendingStatus.keys().next().value;
+      if (oldest !== undefined) pendingStatus.delete(oldest);
+    }
+    pendingStatus.set(messageId, status);
+  }
 }
