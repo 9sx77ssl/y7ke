@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.24] — 2026-05-27
+
+- fix(net): demote Kad routine dial-failure spam from WARN to DEBUG
+
 ## [0.1.23] — 2026-05-27
 
 - test(three_node_kad): retry find_peer to tolerate slow runners

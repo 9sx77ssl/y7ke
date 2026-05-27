@@ -13,11 +13,17 @@ use crate::commands::AppState;
 const EVENT_CHANNEL: &str = "y7ke://event";
 
 fn main() {
+    // Production default: only y7ke modules + UI at info. Noisy libp2p
+    // submodules (mDNS errors on Tailscale interfaces, Kad routing
+    // chatter, ping liveness probes) get pinned at WARN. Devs flip the
+    // levels via `RUST_LOG=debug,...` exactly like before.
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,y7ke=debug,y7ke_ui=debug")),
-        )
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new(
+                "warn,y7ke=info,y7ke_ui=info,libp2p_mdns=error,libp2p_kad=error,\
+                 libp2p_swarm=warn,libp2p_ping=warn,libp2p_identify=warn",
+            )
+        }))
         .init();
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting Y7KE");
