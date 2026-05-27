@@ -7,6 +7,26 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.40] — 2026-05-28
+
+- feat(tauri): get_settings / update_settings / bootstrap commands
+
+## [0.1.39] — 2026-05-28
+
+- feat(app): runtime settings, dial-mode plumbing, ping cache
+
+## [0.1.38] — 2026-05-28
+
+- feat(net): UpdateBootstraps command and multiaddr_is_lan export
+
+## [0.1.37] — 2026-05-28
+
+- feat(storage): settings table + DAO + Settings wire type
+
+## [0.1.36] — 2026-05-28
+
+- feat(ui): settings view, nav entry, and route
+
 ## [0.1.35] — 2026-05-28
 
 - feat(ui): settings bridge wrappers and store
