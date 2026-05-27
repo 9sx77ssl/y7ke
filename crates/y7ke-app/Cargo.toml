@@ -32,6 +32,10 @@ ts-rs              = { workspace = true }
 # version with only the request-response feature so we can name those types.
 libp2p = { workspace = true, features = ["request-response"] }
 
+# Bootstrap config loader (~/.config/y7ke/bootstrap.toml).
+directories = { workspace = true }
+toml        = { workspace = true }
+
 [dev-dependencies]
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
 tempfile = "3"

@@ -78,6 +78,9 @@
   function presenceTone(p: ConnectionKind): StatusTone {
     switch (p) {
       case "lan":
+      case "internet":
+      case "direct":
+      case "relayed":
         return "online";
       case "connecting":
         return "connecting";

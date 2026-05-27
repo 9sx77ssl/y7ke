@@ -3,4 +3,4 @@
 /**
  * How a peer is currently reachable.
  */
-export type ConnectionKind = "offline" | "connecting" | "lan" | "direct" | "relayed";
+export type ConnectionKind = "offline" | "connecting" | "lan" | "internet" | "direct" | "relayed";

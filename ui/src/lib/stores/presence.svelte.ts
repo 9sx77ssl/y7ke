@@ -29,6 +29,8 @@ export function presenceLabel(kind: ConnectionKind): string {
       return "Connecting";
     case "lan":
       return "LAN";
+    case "internet":
+      return "Internet";
     case "direct":
       return "Direct";
     case "relayed":

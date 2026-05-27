@@ -50,9 +50,12 @@ pub enum ConnectionKind {
     Connecting,
     /// LAN (mDNS-discovered).
     Lan,
-    /// Direct internet connection (V2).
+    /// Direct internet connection — peer found via Kademlia DHT and a TCP
+    /// session reached them without relay assistance (V2-A1+A2).
+    Internet,
+    /// Direct internet after a NAT hole-punch upgrade (V2-A5, DCUtR).
     Direct,
-    /// Connected through a circuit relay (V2).
+    /// Connected through a circuit relay (V2-A4).
     Relayed,
 }
 

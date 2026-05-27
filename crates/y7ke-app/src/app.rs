@@ -7,7 +7,9 @@ use tokio::sync::broadcast;
 use y7ke_core::crypto::SigningKey;
 use y7ke_core::error::Result;
 use y7ke_core::{AppEvent, ConnectionKind, Y7Id};
-use y7ke_net::{build_swarm, libp2p_keypair_from_y7_secret, spawn_swarm, NetHandle};
+use y7ke_net::{
+    build_swarm, libp2p_keypair_from_y7_secret, spawn_swarm_with_bootstraps, NetHandle,
+};
 use y7ke_storage::{Db, DbConfig};
 
 use crate::rate_limit::RateLimiter;
@@ -67,7 +69,8 @@ impl AppHandle {
 
         let keypair = libp2p_keypair_from_y7_secret(&secret)?;
         let swarm = build_swarm(keypair)?;
-        let net = spawn_swarm(swarm);
+        let bootstraps = crate::config::load_bootstraps();
+        let net = spawn_swarm_with_bootstraps(swarm, bootstraps);
         let event_rx_for_loop = net.try_clone_event_rx();
 
         let inner = Arc::new(AppInner {

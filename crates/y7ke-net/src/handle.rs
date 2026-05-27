@@ -137,6 +137,27 @@ impl NetHandle {
             .map_err(|e| AppError::network(format!("command channel closed: {e}")))
     }
 
+    /// Look up a peer's currently-known multiaddrs via the Kademlia DHT
+    /// (V2-A1). Returns the addresses Kad has recorded for the peer, or
+    /// `AppError::NotFound` if the lookup completes without finding any.
+    /// Times out after 10 seconds.
+    pub async fn find_peer(&self, y7_id: Y7Id) -> Result<Vec<Multiaddr>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(NetCommand::FindPeer {
+                y7_id,
+                response_tx: tx,
+            })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))?;
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+            Ok(Ok(Ok(addrs))) => Ok(addrs),
+            Ok(Ok(Err(e))) => Err(e),
+            Ok(Err(_)) => Err(AppError::network("find_peer response channel dropped")),
+            Err(_) => Err(AppError::network("find_peer timed out after 10s")),
+        }
+    }
+
     /// Send a handshake request and await the matching response. Returns
     /// `AppError::Network` on timeout, transport failure, or task
     /// shutdown.
@@ -289,6 +310,12 @@ pub enum NetCommand {
     /// also recorded in the per-peer address book so subsequent
     /// `send_*` calls can re-use it.
     DialAddress { address: Multiaddr },
+    /// Issue a Kademlia `get_providers` query for the peer's record key
+    /// and resolve `response_tx` with the addresses Kad gathers en route.
+    FindPeer {
+        y7_id: Y7Id,
+        response_tx: oneshot::Sender<Result<Vec<Multiaddr>, AppError>>,
+    },
     /// Open `/y7ke/handshake/1.0.0` to `peer` and await the response.
     SendHandshake {
         peer: PeerId,

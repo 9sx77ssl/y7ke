@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use libp2p::{
     core::ConnectedPoint,
-    identify, identity, mdns, noise,
+    identify, identity, kad, mdns, noise,
     request_response::{self, OutboundRequestId},
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -33,6 +33,15 @@ use crate::handle::{
     NetCommand, NetEvent, NetHandle, TakeOnce, COMMAND_CHANNEL_CAPACITY, EVENT_CHANNEL_CAPACITY,
 };
 use crate::protocol::{HandshakeResp, MsgResp, SyncResp};
+
+/// Bootstrap peer multiaddrs hardcoded into release builds. Populated
+/// after the first internet-mode deploy captures a stable bootstrap
+/// node's PeerId; left empty by default so `cargo test` and dev
+/// environments don't try to dial anything they shouldn't.
+///
+/// The application layer (`y7ke-app::Config::load`) overrides this from
+/// `~/.config/y7ke/bootstrap.toml` or the `Y7KE_BOOTSTRAP` env var.
+pub const DEFAULT_BOOTSTRAPS: &[&str] = &[];
 
 /// Default listen address (random TCP port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
@@ -68,6 +77,8 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
             yamux::Config::default,
         )
         .map_err(|e| AppError::network(format!("tcp/noise/yamux setup: {e}")))?
+        .with_dns()
+        .map_err(|e| AppError::network(format!("dns transport setup: {e}")))?
         .with_behaviour(|kp| {
             Y7Behaviour::new(kp)
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
@@ -85,7 +96,19 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
 /// `NetEvent::Listening` per bound address, then loops on
 /// `tokio::select!` until either every `NetHandle` clone is dropped (the
 /// command channel closes) or `NetCommand::Shutdown` is received.
-pub fn spawn_swarm(mut swarm: Swarm<Y7Behaviour>) -> NetHandle {
+pub fn spawn_swarm(swarm: Swarm<Y7Behaviour>) -> NetHandle {
+    spawn_swarm_with_bootstraps(swarm, Vec::new())
+}
+
+/// Like [`spawn_swarm`] but seeds the Kademlia routing table with the
+/// given bootstrap multiaddrs. Each entry must include `/p2p/<peer-id>`
+/// so the routing table can map peer_id → addresses without a separate
+/// identify round-trip. Entries without `/p2p/` are warned about and
+/// skipped.
+pub fn spawn_swarm_with_bootstraps(
+    mut swarm: Swarm<Y7Behaviour>,
+    bootstraps: Vec<Multiaddr>,
+) -> NetHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<NetCommand>(COMMAND_CHANNEL_CAPACITY);
     let (event_tx, event_rx) = broadcast::channel::<NetEvent>(EVENT_CHANNEL_CAPACITY);
     let event_tx_for_task = event_tx.clone();
@@ -99,6 +122,33 @@ pub fn spawn_swarm(mut swarm: Swarm<Y7Behaviour>) -> NetHandle {
         let _ = event_tx.send(NetEvent::Error {
             message: format!("listen_on({DEFAULT_LISTEN_ADDR}) failed: {e}"),
         });
+    }
+
+    // Seed the Kad routing table from configured bootstraps before
+    // entering the loop. We don't dial yet — Kad's `bootstrap()` call
+    // (issued once a peer is in the table) does that for us.
+    for addr in &bootstraps {
+        match peer_id_from_multiaddr(addr) {
+            Some(peer) => {
+                swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
+                if let Err(e) = swarm.dial(addr.clone()) {
+                    warn!(%addr, "bootstrap dial failed: {e}");
+                } else {
+                    info!(%peer, %addr, "dialing bootstrap node");
+                }
+            }
+            None => {
+                warn!(
+                    %addr,
+                    "bootstrap multiaddr lacks /p2p/<peer-id>; ignoring"
+                );
+            }
+        }
+    }
+    if !bootstraps.is_empty() {
+        if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+            warn!("kad.bootstrap() failed: {e}");
+        }
     }
 
     tokio::spawn(run_swarm(swarm, cmd_rx, event_tx_for_task));
@@ -151,8 +201,8 @@ async fn run_swarm(
 /// Cached state for the swarm task — never escapes the task.
 #[derive(Default)]
 struct TaskState {
-    /// Best-known addresses for each peer, populated from mDNS and
-    /// identify events.
+    /// Best-known addresses for each peer, populated from mDNS,
+    /// identify, and Kad-routing events.
     address_book: HashMap<PeerId, Vec<Multiaddr>>,
 
     /// Pending response slots for outbound requests, keyed by the
@@ -161,6 +211,17 @@ struct TaskState {
     pending_handshake: HashMap<OutboundRequestId, oneshot::Sender<Result<HandshakeResp, AppError>>>,
     pending_msg: HashMap<OutboundRequestId, oneshot::Sender<Result<MsgResp, AppError>>>,
     pending_sync: HashMap<OutboundRequestId, oneshot::Sender<Result<SyncResp, AppError>>>,
+
+    /// Pending `FindPeer` queries — keyed by Kad `QueryId`. Each entry
+    /// is the target PeerId we're looking for and the oneshot to
+    /// resolve when the addresses are known (or the query completes).
+    pending_find_peer:
+        HashMap<kad::QueryId, (PeerId, oneshot::Sender<Result<Vec<Multiaddr>, AppError>>)>,
+
+    /// True once `kad.start_providing(self)` has been issued. Deferred
+    /// until the routing table has at least one peer — calling it
+    /// against an empty table fails with `NoKnownPeers`.
+    provided_self: bool,
 }
 
 impl TaskState {
@@ -223,6 +284,28 @@ fn handle_command(
                     );
                 }
             }
+        }
+
+        NetCommand::FindPeer { y7_id, response_tx } => {
+            let peer = match peer_id_from_y7(&y7_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = response_tx.send(Err(e));
+                    return;
+                }
+            };
+            // Fast path: if we already know addresses (mDNS / identify
+            // / earlier Kad), short-circuit without issuing a query.
+            if let Some(addrs) = state.address_book.get(&peer) {
+                if !addrs.is_empty() {
+                    let _ = response_tx.send(Ok(addrs.clone()));
+                    return;
+                }
+            }
+            let key = kad::RecordKey::new(&peer.to_bytes());
+            let qid = swarm.behaviour_mut().kad.get_providers(key);
+            state.pending_find_peer.insert(qid, (peer, response_tx));
+            debug!(%peer, "kad find_peer issued");
         }
 
         NetCommand::DialAddress { address } => {
@@ -387,6 +470,10 @@ async fn handle_swarm_event(
             handle_sync_event(state, event_tx, event);
         }
 
+        SwarmEvent::Behaviour(Y7BehaviourEvent::Kad(event)) => {
+            handle_kad(swarm, state, event_tx, event);
+        }
+
         _ => {
             // Other variants (Dialing, IncomingConnection, ExternalAddr*, ...) are
             // not load-bearing in V1.
@@ -429,6 +516,87 @@ fn handle_mdns(
             }
         }
     }
+}
+
+fn handle_kad(
+    swarm: &mut Swarm<Y7Behaviour>,
+    state: &mut TaskState,
+    event_tx: &broadcast::Sender<NetEvent>,
+    event: kad::Event,
+) {
+    match event {
+        kad::Event::RoutingUpdated {
+            peer, addresses, ..
+        } => {
+            debug!(%peer, addr_count = addresses.len(), "kad routing updated");
+            for addr in addresses.iter() {
+                state.remember_address(peer, addr.clone());
+                swarm.add_peer_address(peer, addr.clone());
+            }
+            // First time we have anyone in the routing table → safe to
+            // advertise self.
+            if !state.provided_self {
+                let own_peer = *swarm.local_peer_id();
+                let key = kad::RecordKey::new(&own_peer.to_bytes());
+                match swarm.behaviour_mut().kad.start_providing(key) {
+                    Ok(_) => {
+                        state.provided_self = true;
+                        info!(%own_peer, "kad: started providing self");
+                    }
+                    Err(e) => debug!("start_providing deferred: {e}"),
+                }
+            }
+        }
+        kad::Event::OutboundQueryProgressed {
+            id, result, step, ..
+        } => {
+            if let kad::QueryResult::GetProviders(Ok(ok)) = &result {
+                if let kad::GetProvidersOk::FoundProviders { providers, .. } = ok {
+                    // Borrow target separately from the mutable remove() below.
+                    let target = state.pending_find_peer.get(&id).map(|(t, _)| *t);
+                    if let Some(target) = target {
+                        if providers.contains(&target) {
+                            let addrs =
+                                state.address_book.get(&target).cloned().unwrap_or_default();
+                            if !addrs.is_empty() {
+                                if let Some((_, tx)) = state.pending_find_peer.remove(&id) {
+                                    debug!(%target, addr_count = addrs.len(), "find_peer: resolved via Kad");
+                                    let _ = tx.send(Ok(addrs));
+                                }
+                            }
+                            // If we matched the target but don't yet
+                            // have their addresses in the address_book,
+                            // wait for `RoutingUpdated` to populate
+                            // them; the query's final step (below) will
+                            // give up if nothing arrives.
+                        }
+                    }
+                }
+            }
+            // Query terminated (success or failure) — drain any pending
+            // entry that didn't already resolve.
+            if step.last {
+                if let Some((target, tx)) = state.pending_find_peer.remove(&id) {
+                    let addrs = state.address_book.get(&target).cloned().unwrap_or_default();
+                    if addrs.is_empty() {
+                        debug!(%target, "find_peer: Kad query exhausted with no addresses");
+                        let _ = tx.send(Err(AppError::NotFound));
+                    } else {
+                        let _ = tx.send(Ok(addrs));
+                    }
+                }
+            }
+        }
+        kad::Event::InboundRequest { .. } | kad::Event::ModeChanged { .. } => {
+            // Informational; nothing to do.
+        }
+        other => {
+            debug!(?other, "kad event");
+        }
+    }
+    // Silence the unused-warning for event_tx — we may emit
+    // PeerDiscovered from Kad routing updates in a future iteration.
+    let _ = event_tx;
 }
 
 fn handle_identify(state: &mut TaskState, event: identify::Event) {
@@ -606,12 +774,44 @@ fn emit(event_tx: &broadcast::Sender<NetEvent>, event: NetEvent) {
 
 /// Classify an endpoint into a `y7ke-core::ConnectionKind`.
 ///
-/// V1 has only LAN-style connections (the swarm only listens on
-/// `/ip4/0.0.0.0/tcp/0` and discovers peers via mDNS), so we always
-/// report `Lan`. V2 will add `Direct` and `Relayed` when DCUtR and
-/// circuit relay land.
-fn connection_kind_for(_endpoint: &ConnectedPoint) -> ConnectionKind {
-    ConnectionKind::Lan
+/// V2-A1 distinguishes LAN-private (RFC 1918 / link-local / loopback)
+/// addrs — what mDNS would have surfaced anyway — from anything else,
+/// which we mark `Internet`. The DCUtR-upgraded `Direct` and the
+/// relay-routed `Relayed` variants land later.
+fn connection_kind_for(endpoint: &ConnectedPoint) -> ConnectionKind {
+    let addr = endpoint.get_remote_address();
+    if multiaddr_is_lan(addr) {
+        ConnectionKind::Lan
+    } else {
+        ConnectionKind::Internet
+    }
+}
+
+/// Best-effort check: is `addr` a LAN-private or loopback address?
+/// We look at the first `Ip4` / `Ip6` component and apply RFC 1918 /
+/// IPv6 unique-local rules. Anything else (DNS names, public IPs,
+/// relay multiaddrs) is treated as non-LAN.
+fn multiaddr_is_lan(addr: &Multiaddr) -> bool {
+    for proto in addr.iter() {
+        match proto {
+            libp2p::multiaddr::Protocol::Ip4(ip) => {
+                return ip.is_loopback()
+                    || ip.is_private()
+                    || ip.is_link_local()
+                    || ip.is_unspecified();
+            }
+            libp2p::multiaddr::Protocol::Ip6(ip) => {
+                if ip.is_loopback() || ip.is_unspecified() {
+                    return true;
+                }
+                // Unique-local fc00::/7 + link-local fe80::/10.
+                let seg = ip.segments()[0];
+                return (seg & 0xfe00) == 0xfc00 || (seg & 0xffc0) == 0xfe80;
+            }
+            _ => continue,
+        }
+    }
+    false
 }
 
 /// Build a libp2p `PeerId` from a Y7 identifier.

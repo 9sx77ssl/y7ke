@@ -37,6 +37,12 @@ docs/                  # ARCHITECTURE, ROADMAP
 - **Wire types are authoritative.** When you change `AppEvent`,
   `ContactView`, `MessageView`, etc., run `cargo test` once so ts-rs
   regenerates `ui/src/lib/gen/`.
+- **Bootstrap node lives in a separate repo** — `9sx77ssl/y7ke-bootstrap`.
+  Don't add the bootstrap daemon back into this repo. The client side
+  (Kad behaviour, `find_peer`, `DEFAULT_BOOTSTRAPS`) is here; the daemon
+  is its own crate with zero `y7ke-*` dependencies because it must
+  remain stateless (it can't decrypt traffic if it never sees Y7KE wire
+  types).
 - **mDNS-dependent integration tests** are guarded with
   `#[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)]`
   because GitHub Actions runners don't surface peers reliably. They run

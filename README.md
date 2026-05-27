@@ -107,6 +107,45 @@ and locally.
 - `PRAGMA secure_delete = ON` overwrites freed pages with zeros, so a wiped message or session can't be carved out of the database file.
 - Every envelope is signed with the sender's long-term Ed25519 key so receivers detect tampering and impersonation.
 
+## Internet mode (V2-A1+A2)
+
+V1 was LAN-only via mDNS. From v0.1.20, the client also speaks Kademlia
+DHT and reaches peers across the open internet through a stable
+bootstrap node. Discovery chain on `dial_with_discovery`:
+
+1. swarm address book (mDNS + identify cache)
+2. `peer_state.last_addrs` (persisted across restarts)
+3. `find_peer` via Kad against the configured bootstraps
+4. Direct TCP dial
+
+Bootstraps are sourced in this order, first non-empty wins:
+
+1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs)
+2. `~/.config/y7ke/bootstrap.toml`:
+   ```toml
+   peers = [
+     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…",
+   ]
+   ```
+3. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded at build time.
+
+Want to run your own bootstrap? The standalone daemon lives in a
+separate repo: <https://github.com/9sx77ssl/y7ke-bootstrap>.
+One-line installer:
+
+```bash
+bash <(curl -sSL https://github.com/9sx77ssl/y7ke-bootstrap/raw/main/install.sh)
+```
+
+It downloads the latest release binary, installs a systemd unit at
+`/etc/systemd/system/y7ke-bootstrap.service`, opens TCP 4101 if a
+firewall is already running (skips if none), and prints the generated
+PeerId for you to publish.
+
+What V2-A still doesn't ship: NAT hole-punching (DCUtR), circuit relay,
+QUIC. Peers behind symmetric NAT fail their direct dial gracefully and
+stay discoverable in the DHT.
+
 ## Documentation
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — implementation architecture

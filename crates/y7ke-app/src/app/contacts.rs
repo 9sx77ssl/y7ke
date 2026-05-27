@@ -55,9 +55,7 @@ impl AppHandle {
             })
             .await?;
 
-        if let Err(e) = self.inner.net.dial(peer).await {
-            tracing::warn!(error = %e, %peer, "dial failed; proceeding to handshake");
-        }
+        self.dial_with_discovery(peer).await;
         let (req, eph) = crate::handshake::open_initiator(
             &self.inner.me,
             &self.inner.my_pubkey,
@@ -68,6 +66,49 @@ impl AppHandle {
         crate::handshake::finalize_initiator(eph, &self.inner.my_pubkey, peer.pubkey(), &resp)?;
         self.inner.db.sessions().upsert(&peer).await?;
         Ok(())
+    }
+
+    /// V2-A1 discovery chain: mDNS cache → cached `peer_state.last_addrs`
+    /// → Kademlia DHT lookup → direct dial. All four steps are best-
+    /// effort; any successful dial enqueues a handshake later.
+    async fn dial_with_discovery(&self, peer: Y7Id) {
+        // 1. Fast path: mDNS / identify address book in the swarm.
+        if self.inner.net.dial(peer).await.is_ok() {
+            return;
+        }
+        // 2. Cached addrs from a previous session.
+        if let Ok(Some(state)) = self.inner.db.peer_state().get(&peer).await {
+            if let Some(json) = state.last_addrs_json {
+                if let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) {
+                    for s in addrs {
+                        if let Ok(m) = s.parse::<libp2p::Multiaddr>() {
+                            if self.inner.net.dial_address(m).await.is_ok() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 3. Kad lookup. find_peer either resolves to addrs we can dial
+        //    or returns NotFound after a 10 s window.
+        match self.inner.net.find_peer(peer).await {
+            Ok(addrs) => {
+                for addr in addrs {
+                    if self.inner.net.dial_address(addr).await.is_ok() {
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(%peer, error = %e, "find_peer via Kad failed");
+            }
+        }
+        // 4. Last resort: ask the swarm one more time — by now Kad may
+        //    have populated its routing table.
+        if let Err(e) = self.inner.net.dial(peer).await {
+            tracing::warn!(%peer, error = %e, "all discovery paths exhausted");
+        }
     }
 
     pub async fn accept_request(&self, id: i64) -> Result<()> {

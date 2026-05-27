@@ -770,6 +770,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "crunchy"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2534,6 +2540,7 @@ dependencies = [
  "libp2p-dns",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-mdns",
  "libp2p-metrics",
  "libp2p-noise",
@@ -2653,6 +2660,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-kad"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d3fd632a5872ec804d37e7413ceea20588f69d027a0fa3c46f82574f4dee60"
+dependencies = [
+ "asynchronous-codec",
+ "bytes",
+ "either",
+ "fnv",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "rand 0.8.6",
+ "sha2",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tracing",
+ "uint",
+ "web-time",
+]
+
+[[package]]
 name = "libp2p-mdns"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,6 +2715,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-kad",
  "libp2p-ping",
  "libp2p-swarm",
  "pin-project",
@@ -5977,6 +6012,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
+name = "uint"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "909988d098b2f738727b161a106cfc7cab00c539c2687a8836f8e565976fb53e"
+dependencies = [
+ "byteorder",
+ "crunchy",
+ "hex",
+ "static_assertions",
+]
+
+[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7290,17 +7337,19 @@ dependencies = [
 
 [[package]]
 name = "y7ke-app"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "anyhow",
  "async-trait",
  "blake3",
+ "directories",
  "libp2p",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.2",
  "tracing",
  "tracing-subscriber",
  "ts-rs",
@@ -7311,7 +7360,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-core"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "blake3",
  "bs58",
@@ -7335,7 +7384,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-net"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "async-trait",
  "bincode",
@@ -7353,7 +7402,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-storage"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "async-trait",
  "directories",
@@ -7371,7 +7420,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-tauri"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "serde",
  "serde_json",

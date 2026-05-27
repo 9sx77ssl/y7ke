@@ -35,6 +35,8 @@ libp2p = { workspace = true, features = [
     "request-response",
     "cbor",
     "macros",
+    "kad",
+    "dns",
 ] }
 
 [dev-dependencies]

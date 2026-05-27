@@ -9,6 +9,7 @@ use std::time::Duration;
 use libp2p::{
     identify,
     identity::Keypair,
+    kad::{self, store::MemoryStore},
     mdns, ping,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
@@ -16,7 +17,7 @@ use libp2p::{
 
 use crate::protocol::{
     HandshakeReq, HandshakeResp, MsgReq, MsgResp, SyncReq, SyncResp, HANDSHAKE_PROTOCOL,
-    IDENTIFY_AGENT_VERSION, IDENTIFY_PROTOCOL_VERSION, MSG_PROTOCOL, SYNC_PROTOCOL,
+    IDENTIFY_AGENT_VERSION, IDENTIFY_PROTOCOL_VERSION, KAD_PROTOCOL, MSG_PROTOCOL, SYNC_PROTOCOL,
 };
 
 /// Composite network behaviour driving the Y7KE swarm.
@@ -40,6 +41,11 @@ pub struct Y7Behaviour {
     pub msg: request_response::cbor::Behaviour<MsgReq, MsgResp>,
     /// `/y7ke/sync/1.0.0`.
     pub sync: request_response::cbor::Behaviour<SyncReq, SyncResp>,
+    /// Kademlia DHT — V2-A1. Used for internet-mode peer discovery via
+    /// bootstrap nodes. Server mode so routing replicates between all
+    /// participating peers; each client `start_providing`s its own key so
+    /// other clients can look it up via `get_providers`.
+    pub kad: kad::Behaviour<MemoryStore>,
 }
 
 impl Y7Behaviour {
@@ -93,6 +99,15 @@ impl Y7Behaviour {
             rr_config,
         );
 
+        let mut kad_cfg = kad::Config::new(KAD_PROTOCOL);
+        // 5-minute periodic bootstrap keeps routing fresh without hammering
+        // the network. Default is 5 min already in newer libp2p but pin it
+        // here so future libp2p bumps don't change behaviour silently.
+        kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
+        let mut kad =
+            kad::Behaviour::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_cfg);
+        kad.set_mode(Some(kad::Mode::Server));
+
         Ok(Self {
             identify,
             ping,
@@ -100,6 +115,7 @@ impl Y7Behaviour {
             handshake,
             msg,
             sync,
+            kad,
         })
     }
 }

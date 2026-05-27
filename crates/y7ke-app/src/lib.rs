@@ -5,6 +5,7 @@
 //! integration tests can run in CI.
 
 pub mod app;
+pub mod config;
 pub mod event_loop;
 pub mod handshake;
 pub mod identity;

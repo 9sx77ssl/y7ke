@@ -114,6 +114,11 @@ pub const MSG_PROTOCOL: StreamProtocol = StreamProtocol::new("/y7ke/msg/1.0.0");
 /// `/y7ke/sync/1.0.0` — offline-sync reconcile (3 logical rounds, single codec).
 pub const SYNC_PROTOCOL: StreamProtocol = StreamProtocol::new("/y7ke/sync/1.0.0");
 
+/// `/y7ke/kad/1.0.0` — Kademlia DHT protocol identifier (V2-A1).
+/// Y7KE has its own Kad namespace; this binary won't share routing with IPFS
+/// or any other libp2p Kad network.
+pub const KAD_PROTOCOL: StreamProtocol = StreamProtocol::new("/y7ke/kad/1.0.0");
+
 /// `identify` protocol-version string advertised to peers.
 pub const IDENTIFY_PROTOCOL_VERSION: &str = "/y7ke/0.1.0";
 

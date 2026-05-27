@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.19] — 2026-05-27
+
+- docs: V1 done, ROADMAP cleaned, CHANGELOG narrates the class:failed bug
+
 ## [0.1.18] — 2026-05-27
 
 ### Fixed

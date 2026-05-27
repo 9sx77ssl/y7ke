@@ -4,7 +4,7 @@
 
 ```
 V1 LAN messenger          ✓ shipped (2026-05-27, v0.1.18)
-V2 Track A — Internet     ◯ not started
+V2 Track A — Internet     ◐ A1+A2 shipped (v0.1.20), A3-A6 pending
 V2 Track B — Crypto uplift ◯ not started
 V2 Track C — Sync polish   ✓ shipped (C1-C4 all in main)
 V2 Track D — Tooling       ◐ D1 done, D2 pending
@@ -66,18 +66,25 @@ secrecy, OS keychain, group chats, file transfer.
 
 ## V2 — what's left (Track A + Track B + D2)
 
-### Track A — Internet reachability ◯
+### Track A — Internet reachability ◐
 
 > **Goal:** two Y7KE peers on different home networks behind NATs talk
 > directly to each other (or via relay when DCUtR fails), without
 > the user configuring anything.
 
-1. **A1 — DHT-based peer lookup.** libp2p Kademlia with `MemoryStore`.
-   Discovery chain: mDNS cache → `peer_state.last_addrs` → Kad lookup.
-2. **A2 — Bootstrap relays.** `crates/y7ke-bootstrap` running the same
-   swarm minus contacts/storage, deployed behind a static IP. Default
-   build ships 2–3 hardcoded multiaddrs; `~/.config/y7ke/bootstrap.toml`
-   overrides them.
+1. **A1 — DHT-based peer lookup.** ✓ Shipped (v0.1.20). libp2p Kademlia
+   `Behaviour<MemoryStore>` in server mode, protocol `/y7ke/kad/1.0.0`.
+   Discovery chain in `crates/y7ke-app/src/app/contacts.rs`:
+   `net.dial(peer)` (mDNS cache + identify) → `peer_state.last_addrs`
+   → `net.find_peer(y7)` Kad lookup → `dial_address`. `peer_state`
+   persists every `addrs` seen so cold-restart skips the Kad round-trip.
+2. **A2 — Bootstrap node.** ✓ Shipped (v0.1.20). Standalone crate
+   `9sx77ssl/y7ke-bootstrap` (separate repo), zero `y7ke-*` deps —
+   pure libp2p Kad + identify + ping. `install.sh` does six minimal
+   steps (download, user, systemd, optional firewall, start, print
+   PeerId). Client uses `DEFAULT_BOOTSTRAPS` from
+   `y7ke-net/src/swarm.rs` with `~/.config/y7ke/bootstrap.toml` and
+   `Y7KE_BOOTSTRAP` env-var override.
 3. **A3 — AutoNAT v2.** Detect public reachability, cache result,
    surface as a status pill in the UI (`public` / `private` /
    `unknown`).

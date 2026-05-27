@@ -59,6 +59,14 @@ async fn dispatch(
         NetEvent::PeerDiscovered { peer, addrs, y7_id } => {
             tracing::debug!(peer = %peer, addrs = ?addrs, y7_id = ?y7_id, "peer discovered");
             if let Some(y7) = y7_id {
+                // V2-A1: persist the addr list so future dials can take
+                // the cache fast path instead of waiting on Kad lookup.
+                if !addrs.is_empty() {
+                    let strs: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
+                    if let Ok(json) = serde_json::to_string(&strs) {
+                        let _ = inner.db.peer_state().upsert_seen(&y7, Some(json)).await;
+                    }
+                }
                 drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
