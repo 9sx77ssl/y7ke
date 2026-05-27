@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.10] — 2026-05-27
+
+- fix(ui): chat race + y7 ID selectability
+
 ## [0.1.9] — 2026-05-27
 
 - ci: build tauri binary with custom-protocol feature enabled
