@@ -8,6 +8,8 @@ use tauri::{async_runtime, Emitter, Manager};
 use tracing_subscriber::EnvFilter;
 use y7ke_app::{AppConfig, AppHandle};
 
+use crate::commands::AppState;
+
 const EVENT_CHANNEL: &str = "y7ke://event";
 
 fn main() {
@@ -30,40 +32,54 @@ fn main() {
 
     let result = tauri::Builder::default()
         .setup(|app| {
-            // Boot the y7ke-app composition root synchronously so that all
-            // commands have access to a fully-initialised AppHandle the
-            // moment the window appears.
-            let config = AppConfig::default_for_app()?;
-            let y7_handle: AppHandle = async_runtime::block_on(AppHandle::boot(config))?;
-            let y7_handle = Arc::new(y7_handle);
+            // Register an empty AppState immediately so commands can be
+            // resolved; the actual AppHandle::boot runs in the background.
+            let state = Arc::new(AppState::new());
+            app.manage(Arc::clone(&state));
 
-            // Forward backend AppEvents to the frontend through a single
-            // Tauri event channel. The UI registers one listener and
-            // discriminates on `event.kind`.
-            let mut sub = y7_handle.subscribe();
             let emitter = app.handle().clone();
             async_runtime::spawn(async move {
-                loop {
-                    match sub.recv().await {
-                        Ok(event) => {
-                            if let Err(e) = emitter.emit(EVENT_CHANNEL, &event) {
-                                tracing::warn!(error = %e, "failed to emit app event to UI");
+                let config = match AppConfig::default_for_app() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(error = %e, "AppConfig::default_for_app failed");
+                        return;
+                    }
+                };
+                let y7_handle: AppHandle = match AppHandle::boot(config).await {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::error!(error = %e, "AppHandle::boot failed");
+                        return;
+                    }
+                };
+                let y7_handle = Arc::new(y7_handle);
+
+                // Stream AppEvents from the backend to the UI's single channel.
+                let mut sub = y7_handle.subscribe();
+                let event_emitter = emitter.clone();
+                async_runtime::spawn(async move {
+                    loop {
+                        match sub.recv().await {
+                            Ok(event) => {
+                                if let Err(e) = event_emitter.emit(EVENT_CHANNEL, &event) {
+                                    tracing::warn!(error = %e, "emit failed");
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(dropped = n, "AppEvent emitter lagged");
                             }
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            tracing::warn!("AppEvent channel closed; emitter task exiting");
-                            return;
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(dropped = n, "AppEvent emitter lagged");
-                        }
                     }
-                }
+                });
+
+                state.set(y7_handle).await;
+                let _ = emitter.emit(EVENT_CHANNEL, &serde_json::json!({ "kind": "boot_ready" }));
+                tracing::info!("y7ke boot complete; commands now live");
             });
 
-            // Make the AppHandle available to commands as managed state.
-            app.manage(y7_handle);
-            tracing::info!("y7ke shell ready");
+            tracing::info!("y7ke shell ready (boot deferred)");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -75,10 +91,11 @@ fn main() {
                 api.prevent_close();
                 let win = window.clone();
                 async_runtime::spawn(async move {
-                    if let Some(handle) = win.try_state::<Arc<AppHandle>>() {
-                        let _ = handle.shutdown().await;
+                    if let Some(state) = win.try_state::<Arc<AppState>>() {
+                        if let Some(handle) = state.try_get().await {
+                            let _ = handle.shutdown().await;
+                        }
                     }
-                    // Brief drain window.
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     let _ = win.destroy();
                 });
@@ -96,6 +113,7 @@ fn main() {
             commands::list_messages,
             commands::send_message,
             commands::log_from_ui,
+            commands::boot_ready,
         ])
         .run(tauri::generate_context!());
 
