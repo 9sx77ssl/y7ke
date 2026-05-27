@@ -99,6 +99,7 @@ export const chat = {
  */
 export async function openConversation(peerY7Id: string): Promise<void> {
   const myGen = ++loadGen;
+  logger.debug("openConversation: enter", { peer: peerY7Id, gen: myGen });
   state.peerY7Id = peerY7Id;
   state.conversationId = null;
   state.messages = [];
@@ -106,8 +107,23 @@ export async function openConversation(peerY7Id: string): Promise<void> {
   state.loading = true;
   try {
     const items = await rpcListMessages(peerY7Id, PAGE_LIMIT);
+    logger.debug("openConversation: list_messages resolved", {
+      peer: peerY7Id,
+      gen: myGen,
+      currentGen: loadGen,
+      currentPeer: state.peerY7Id,
+      count: items.length,
+    });
     // Bail if a newer load has started OR the user switched peers.
-    if (state.peerY7Id !== peerY7Id || myGen !== loadGen) return;
+    if (state.peerY7Id !== peerY7Id || myGen !== loadGen) {
+      logger.warn("openConversation: bailing (newer load or peer switched)", {
+        peer: peerY7Id,
+        gen: myGen,
+        currentGen: loadGen,
+        currentPeer: state.peerY7Id,
+      });
+      return;
+    }
 
     // Merge with anything added to state.messages during the await window —
     // optimistic placeholders from sendText, or message_received events that
@@ -115,9 +131,17 @@ export async function openConversation(peerY7Id: string): Promise<void> {
     // silently wipe the user's freshly-sent message from the UI.
     const itemIds = new Set(items.map((m) => m.message_id));
     const localOnly = state.messages.filter((m) => !itemIds.has(m.message_id));
-    state.messages = [...items, ...localOnly].sort(
+    const merged = [...items, ...localOnly].sort(
       (a, b) => a.timestamp_ms - b.timestamp_ms,
     );
+    state.messages = merged;
+    logger.debug("openConversation: merged + applied", {
+      peer: peerY7Id,
+      items: items.length,
+      localOnly: localOnly.length,
+      total: merged.length,
+      stateLen: state.messages.length,
+    });
 
     // Only adopt a conversation_id from a real server item; placeholders
     // carry "" and would otherwise poison the event filter.
@@ -125,6 +149,10 @@ export async function openConversation(peerY7Id: string): Promise<void> {
       state.conversationId = items[0]!.conversation_id;
     }
   } catch (err) {
+    logger.error("openConversation: list_messages failed", {
+      peer: peerY7Id,
+      err: err instanceof Error ? err.message : String(err),
+    });
     if (state.peerY7Id === peerY7Id) {
       state.error = err instanceof Error ? err.message : String(err);
     }
@@ -134,6 +162,10 @@ export async function openConversation(peerY7Id: string): Promise<void> {
 }
 
 export function closeConversation(): void {
+  logger.debug("closeConversation", {
+    peer: state.peerY7Id,
+    prevMsgCount: state.messages.length,
+  });
   state.peerY7Id = null;
   state.conversationId = null;
   state.messages = [];
@@ -173,9 +205,18 @@ export async function sendText(text: string): Promise<void> {
     is_mine: true,
   };
   state.messages = [...state.messages, placeholder];
+  logger.debug("sendText: placeholder inserted", {
+    placeholderId,
+    msgCount: state.messages.length,
+  });
 
   try {
     const realId = await rpcSendMessage(peer, trimmed);
+    logger.debug("sendText: rpcSendMessage resolved", {
+      realId,
+      currentPeer: state.peerY7Id,
+      expectedPeer: peer,
+    });
     // Replace placeholder; do not re-sort because we appended at the tail and
     // server-side timestamps are within ms of Date.now(). Only touch state if
     // we're still on the same peer — otherwise the map runs over the wrong
@@ -186,16 +227,32 @@ export async function sendText(text: string): Promise<void> {
       // apply it now so the bubble doesn't sit on Sending forever.
       const buffered = pendingStatus.get(realId);
       pendingStatus.delete(realId);
+      let matched = false;
       state.messages = state.messages.map((m) => {
         if (m.message_id !== placeholderId) return m;
+        matched = true;
         return {
           ...m,
           message_id: realId,
           status: buffered ?? m.status,
         };
       });
+      logger.debug("sendText: swap placeholder → realId", {
+        realId,
+        matched,
+        bufferedStatus: buffered,
+        msgCount: state.messages.length,
+      });
+    } else {
+      logger.warn("sendText: peer changed during await — no swap", {
+        was: peer,
+        now: state.peerY7Id,
+      });
     }
   } catch (err) {
+    logger.error("sendText: rpcSendMessage failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     // Only surface the error on the conversation that triggered the send;
     // otherwise it bleeds into whichever chat the user switched to.
     if (state.peerY7Id === peer) {
@@ -209,6 +266,10 @@ export async function sendText(text: string): Promise<void> {
     // not gate it on the peer matching, or a peer-switch mid-send would leave
     // Bob's composer disabled until Alice's RPC eventually resolves.
     state.sending = false;
+    logger.debug("sendText: exit", {
+      sending: state.sending,
+      msgCount: state.messages.length,
+    });
   }
 }
 
@@ -220,24 +281,46 @@ export function applyMessageReceived(payload: {
   timestamp_ms: number;
   text: string;
 }): void {
+  logger.debug("applyMessageReceived: called", {
+    mid: payload.message_id,
+    sender: payload.sender_y7_id,
+    convId: payload.conversation_id,
+    currentPeer: state.peerY7Id,
+    currentConvId: state.conversationId,
+  });
   // Ignore events for conversations we don't currently have open. The next
   // openConversation() call will re-fetch from disk and include the message.
   if (
     state.conversationId !== null &&
     payload.conversation_id !== state.conversationId
   ) {
+    logger.debug("applyMessageReceived: filtered (conv mismatch)", {
+      mid: payload.message_id,
+    });
     return;
   }
 
   // If we don't have a conversation_id locked in yet, accept the first event
   // that matches our peer (sender == peer for inbound).
   if (state.conversationId === null) {
-    if (state.peerY7Id !== payload.sender_y7_id) return;
+    if (state.peerY7Id !== payload.sender_y7_id) {
+      logger.debug("applyMessageReceived: filtered (peer mismatch)", {
+        mid: payload.message_id,
+        peer: state.peerY7Id,
+        sender: payload.sender_y7_id,
+      });
+      return;
+    }
     state.conversationId = payload.conversation_id;
   }
 
   // Dedupe — backend can re-emit during sync reconciliation.
-  if (state.messages.some((m) => m.message_id === payload.message_id)) return;
+  if (state.messages.some((m) => m.message_id === payload.message_id)) {
+    logger.debug("applyMessageReceived: filtered (dupe)", {
+      mid: payload.message_id,
+    });
+    return;
+  }
 
   const msg: MessageView = {
     message_id: payload.message_id,
@@ -249,6 +332,10 @@ export function applyMessageReceived(payload: {
     is_mine: false,
   };
   state.messages = [...state.messages, msg];
+  logger.debug("applyMessageReceived: applied", {
+    mid: payload.message_id,
+    msgCount: state.messages.length,
+  });
 }
 
 /** Event dispatch — message_status_changed. */
@@ -268,5 +355,12 @@ export function applyMessageStatus(messageId: string, status: MessageStatus): vo
       if (oldest !== undefined) pendingStatus.delete(oldest);
     }
     pendingStatus.set(messageId, status);
+    logger.debug("applyMessageStatus: buffered (no match)", {
+      mid: messageId,
+      status,
+      pendingSize: pendingStatus.size,
+    });
+  } else {
+    logger.debug("applyMessageStatus: applied", { mid: messageId, status });
   }
 }

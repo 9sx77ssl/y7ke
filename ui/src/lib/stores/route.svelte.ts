@@ -27,6 +27,13 @@ export function openEmpty(): void {
 
 export function openChatWith(peerY7Id: string): void {
   logger.debug("→ chat", peerY7Id);
+  // Skip the reset if we're already on this chat; otherwise closeConversation
+  // would wipe state.messages and Chat.svelte's $effect wouldn't re-fire
+  // because peerY7Id hasn't changed, leaving the user staring at an empty
+  // pane until they navigate away and back.
+  if (route.pane.kind === "chat" && route.pane.peerY7Id === peerY7Id) {
+    return;
+  }
   // Reset any stale chat-store state so the new chat starts fresh.
   closeConversation();
   route.pane = { kind: "chat", peerY7Id };
