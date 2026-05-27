@@ -24,6 +24,12 @@ anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 async-trait        = { workspace = true }
+blake3             = { workspace = true }
+
+# libp2p types appear in y7ke-net's public API (NetEvent carries
+# `request_response::ResponseChannel` via `TakeOnce<_>`). We pull the same
+# version with only the request-response feature so we can name those types.
+libp2p = { workspace = true, features = ["request-response"] }
 
 [dev-dependencies]
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
