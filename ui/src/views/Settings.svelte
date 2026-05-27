@@ -314,17 +314,14 @@
       {:else}
         <ul class="rows">
           {#each rows as r, i (i)}
-            {@const invalid =
-              !r.is_default &&
-              r.multiaddr.trim().length > 0 &&
-              !isLikelyMultiaddr(r.multiaddr)}
+            {@const hasPing =
+              r.last_ping_failed || r.last_ping_ms !== null}
             <li class="row">
               <div class="addr-wrap">
                 <input
                   type="text"
                   class="input"
                   class:locked={r.is_default}
-                  class:invalid
                   value={r.multiaddr}
                   readonly={r.is_default}
                   placeholder="/dns4/host/tcp/4101/p2p/12D3KooW…"
@@ -340,9 +337,11 @@
                 {/if}
               </div>
 
-              <span class="latency tone-{latencyClass(r)}" aria-label="latency">
-                {latencyText(r)}
-              </span>
+              {#if hasPing}
+                <span class="latency tone-{latencyClass(r)}" aria-label="latency">
+                  {latencyText(r)}
+                </span>
+              {/if}
 
               {#if !r.is_default}
                 <button
@@ -354,8 +353,6 @@
                 >
                   ×
                 </button>
-              {:else}
-                <span class="x-spacer" aria-hidden="true"></span>
               {/if}
             </li>
           {/each}
@@ -473,8 +470,7 @@
     gap: var(--y7-sp-2);
   }
   .row {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
+    display: flex;
     gap: var(--y7-sp-2);
     align-items: center;
   }
@@ -482,6 +478,7 @@
     position: relative;
     display: flex;
     align-items: center;
+    flex: 1 1 auto;
     min-width: 0;
   }
   .input {
@@ -509,9 +506,6 @@
     background: var(--y7-bg-elevated);
     cursor: default;
     padding-right: 76px;
-  }
-  .input.invalid {
-    border-color: var(--y7-red-dim);
   }
   .badge {
     position: absolute;
@@ -563,17 +557,18 @@
   }
 
   .x {
-    width: var(--y7-sz-btn-md);
-    height: var(--y7-sz-btn-md);
+    flex-shrink: 0;
+    width: var(--y7-sz-input);
+    height: var(--y7-sz-input);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px solid var(--y7-border-default);
+    border: 1px solid var(--y7-border-subtle);
     border-radius: var(--y7-r-md);
-    color: var(--y7-text-secondary);
+    color: var(--y7-text-muted);
     font-family: var(--y7-font-mono);
-    font-size: 16px;
+    font-size: 18px;
     line-height: 1;
     cursor: pointer;
     transition:
@@ -582,13 +577,13 @@
       border-color var(--y7-dur-fast) var(--y7-ease);
   }
   .x:hover {
-    background: var(--y7-red-soft);
-    border-color: var(--y7-red-dim);
-    color: var(--y7-red);
+    background: var(--y7-bg-hover);
+    border-color: var(--y7-border-default);
+    color: var(--y7-text-primary);
   }
-  .x-spacer {
-    width: var(--y7-sz-btn-md);
-    height: var(--y7-sz-btn-md);
+  .x:focus-visible {
+    outline: none;
+    border-color: var(--y7-border-focus);
   }
 
   .add-btn {

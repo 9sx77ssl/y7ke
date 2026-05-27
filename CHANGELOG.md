@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.43] — 2026-05-28
+
+- chore: sync Cargo.lock to current workspace versions
+
 ## [0.1.40] — 2026-05-28
 
 - feat(tauri): get_settings / update_settings / bootstrap commands
