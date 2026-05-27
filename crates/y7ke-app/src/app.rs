@@ -1,5 +1,6 @@
 //! Composition root: AppHandle owns storage + swarm + identity + event bus.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -17,6 +18,14 @@ use crate::{event_loop, identity};
 
 mod contacts;
 mod messages;
+mod settings;
+
+/// In-memory ping cache entry. Updated only by `ping_all_bootstraps`.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BootstrapPingState {
+    pub last_ping_ms: Option<u64>,
+    pub last_ping_failed: bool,
+}
 
 pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
@@ -49,8 +58,11 @@ pub(crate) struct AppInner {
     pub my_y7_id: Y7Id,
     /// Presence cache populated by event_loop. Read by list_contacts to
     /// survive the boot race where PresenceChanged fires before UI listener.
-    pub presence: tokio::sync::RwLock<std::collections::HashMap<Y7Id, ConnectionKind>>,
+    pub presence: tokio::sync::RwLock<HashMap<Y7Id, ConnectionKind>>,
     pub rate_limiter: RateLimiter,
+    /// Last-known ping state per bootstrap multiaddr (keyed by the full
+    /// multiaddr string). Empty at boot — populated by `ping_all_bootstraps`.
+    pub bootstrap_pings: tokio::sync::RwLock<HashMap<String, BootstrapPingState>>,
 }
 
 pub struct AppHandle {
@@ -69,7 +81,7 @@ impl AppHandle {
 
         let keypair = libp2p_keypair_from_y7_secret(&secret)?;
         let swarm = build_swarm(keypair)?;
-        let bootstraps = crate::config::load_bootstraps();
+        let bootstraps = crate::config::load_bootstraps(&db).await;
         let net = spawn_swarm_with_bootstraps(swarm, bootstraps);
         let event_rx_for_loop = net.try_clone_event_rx();
 
@@ -79,8 +91,9 @@ impl AppHandle {
             me: local.signing_key,
             my_pubkey,
             my_y7_id,
-            presence: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            presence: tokio::sync::RwLock::new(HashMap::new()),
             rate_limiter: RateLimiter::default_limits(),
+            bootstrap_pings: tokio::sync::RwLock::new(HashMap::new()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);

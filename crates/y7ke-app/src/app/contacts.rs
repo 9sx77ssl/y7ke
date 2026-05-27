@@ -85,35 +85,61 @@ impl AppHandle {
 
     /// V2-A1 discovery chain: mDNS cache → cached `peer_state.last_addrs`
     /// → Kademlia DHT lookup → direct dial. All four steps are best-
-    /// effort; any successful dial enqueues a handshake later.
+    /// effort; any successful dial enqueues a handshake later. Each step
+    /// is gated by the user's current `DialModes`.
     async fn dial_with_discovery(&self, peer: Y7Id) {
-        tracing::info!(%peer, "discovery: starting chain");
-
-        // 1. Fast path: mDNS / identify address book in the swarm.
-        match self.inner.net.dial(peer).await {
-            Ok(true) => {
-                tracing::info!(%peer, "discovery: step 1 (swarm address book) issued dial");
-                return;
-            }
-            Ok(false) => {
-                tracing::info!(%peer, "discovery: step 1 — no known addresses in swarm");
-            }
+        let modes = match self.inner.db.settings().get().await {
+            Ok(s) => s.dial_modes,
             Err(e) => {
-                tracing::warn!(%peer, error = %e, "discovery: step 1 — dial command failed");
+                tracing::warn!(error = %e, "settings.get failed; using defaults");
+                y7ke_core::settings::DialModes::default()
             }
+        };
+        tracing::info!(%peer, ?modes, "discovery: starting chain");
+
+        if !modes.lan && !modes.internet && !modes.relay && !modes.p2p {
+            tracing::warn!(%peer, "discovery: all dial modes disabled — skipping");
+            return;
+        }
+        if modes.p2p {
+            tracing::info!(
+                %peer,
+                "p2p hole-punching requested but not implemented yet (V2-A5)"
+            );
         }
 
-        // 2. Cached addrs from a previous session.
+        // 1. Fast path: swarm address book. When `lan` is off we still
+        //    want to dial INTERNET-reachable known addrs, so we only
+        //    skip the call if every known addr is LAN-only.
+        if modes.lan || self.peer_has_non_lan_addr(&peer).await {
+            match self.inner.net.dial(peer).await {
+                Ok(true) => {
+                    tracing::info!(%peer, "discovery: step 1 (swarm address book) issued dial");
+                    return;
+                }
+                Ok(false) => {
+                    tracing::info!(%peer, "discovery: step 1 — no known addresses in swarm");
+                }
+                Err(e) => {
+                    tracing::warn!(%peer, error = %e, "discovery: step 1 — dial command failed");
+                }
+            }
+        } else {
+            tracing::info!(%peer, "discovery: step 1 skipped — lan dial mode off and only LAN addrs known");
+        }
+
+        // 2. Cached addrs from a previous session, filtered by mode.
         if let Ok(Some(state)) = self.inner.db.peer_state().get(&peer).await {
             if let Some(json) = state.last_addrs_json {
                 if let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) {
-                    tracing::info!(%peer, count = addrs.len(), "discovery: step 2 — trying cached addrs");
-                    for s in addrs {
-                        if let Ok(m) = s.parse::<libp2p::Multiaddr>() {
-                            if self.inner.net.dial_address(m).await.is_ok() {
-                                tracing::info!(%peer, "discovery: step 2 cached addr dial issued");
-                                return;
-                            }
+                    let parsed: Vec<libp2p::Multiaddr> =
+                        addrs.iter().filter_map(|s| s.parse().ok()).collect();
+                    let filtered = filter_addrs_by_mode(parsed, &modes);
+                    tracing::info!(%peer, count = filtered.len(), "discovery: step 2 — trying cached addrs");
+                    for m in filtered {
+                        if self.inner.net.dial_address(m).await.is_ok() {
+                            tracing::info!(%peer, "discovery: step 2 cached addr dial issued");
+                            return;
                         }
                     }
                 }
@@ -125,8 +151,9 @@ impl AppHandle {
         tracing::info!(%peer, "discovery: step 3 — Kad get_providers query");
         match self.inner.net.find_peer(peer).await {
             Ok(addrs) => {
-                tracing::info!(%peer, count = addrs.len(), "discovery: step 3 Kad returned addrs");
-                for addr in addrs {
+                let filtered = filter_addrs_by_mode(addrs, &modes);
+                tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter)");
+                for addr in filtered {
                     if self.inner.net.dial_address(addr).await.is_ok() {
                         return;
                     }
@@ -139,17 +166,40 @@ impl AppHandle {
 
         // 4. Last resort: ask the swarm one more time — by now Kad may
         //    have populated its routing table.
-        match self.inner.net.dial(peer).await {
-            Ok(true) => {
-                tracing::info!(%peer, "discovery: step 4 (re-check swarm) issued dial");
+        if modes.lan || self.peer_has_non_lan_addr(&peer).await {
+            match self.inner.net.dial(peer).await {
+                Ok(true) => {
+                    tracing::info!(%peer, "discovery: step 4 (re-check swarm) issued dial");
+                }
+                Ok(false) => {
+                    tracing::warn!(%peer, "discovery: all 4 paths exhausted — peer unreachable");
+                }
+                Err(e) => {
+                    tracing::warn!(%peer, error = %e, "discovery: step 4 dial command failed");
+                }
             }
-            Ok(false) => {
-                tracing::warn!(%peer, "discovery: all 4 paths exhausted — peer unreachable");
-            }
-            Err(e) => {
-                tracing::warn!(%peer, error = %e, "discovery: step 4 dial command failed");
-            }
+        } else {
+            tracing::warn!(%peer, "discovery: all paths exhausted (lan-only addrs but lan mode off)");
         }
+    }
+
+    /// True if at least one cached addr for `peer` is non-LAN. Used to
+    /// decide whether step 1 / step 4 swarm-dials should run when
+    /// `lan = false`.
+    async fn peer_has_non_lan_addr(&self, peer: &Y7Id) -> bool {
+        let Ok(Some(state)) = self.inner.db.peer_state().get(peer).await else {
+            return false;
+        };
+        let Some(json) = state.last_addrs_json else {
+            return false;
+        };
+        let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) else {
+            return false;
+        };
+        addrs
+            .iter()
+            .filter_map(|s| s.parse::<libp2p::Multiaddr>().ok())
+            .any(|m| !y7ke_net::multiaddr_is_lan(&m))
     }
 
     pub async fn accept_request(&self, id: i64) -> Result<()> {
@@ -325,4 +375,31 @@ impl AppHandle {
             .find(|r| r.id == id)
             .ok_or(AppError::NotFound)
     }
+}
+
+/// Drop addrs whose transport class is disabled in `modes`.
+///
+/// - `relay = false` → drop addrs containing `/p2p-circuit`.
+/// - `internet = false` → drop non-LAN, non-circuit addrs.
+/// - `lan = false` → drop LAN addrs (loopback / private / link-local).
+fn filter_addrs_by_mode(
+    addrs: Vec<libp2p::Multiaddr>,
+    modes: &y7ke_core::settings::DialModes,
+) -> Vec<libp2p::Multiaddr> {
+    addrs
+        .into_iter()
+        .filter(|m| {
+            let is_circuit = m
+                .iter()
+                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+            let is_lan = y7ke_net::multiaddr_is_lan(m);
+            if is_circuit {
+                return modes.relay;
+            }
+            if is_lan {
+                return modes.lan;
+            }
+            modes.internet
+        })
+        .collect()
 }
