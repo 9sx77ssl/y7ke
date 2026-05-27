@@ -179,6 +179,14 @@ async fn run_swarm(
         ..TaskState::default()
     };
 
+    // V2-A4: probe bootstraps every BOOTSTRAP_RECONNECT_INTERVAL and
+    // redial any that aren't currently connected. Without this a single
+    // bootstrap restart leaves clients orphaned until Kad's 5-min
+    // periodic bootstrap kicks in.
+    let mut reconnect_tick = tokio::time::interval(BOOTSTRAP_RECONNECT_INTERVAL);
+    reconnect_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    reconnect_tick.tick().await; // skip the immediate first tick
+
     loop {
         tokio::select! {
             // Process swarm events first to drain the network side
@@ -204,6 +212,24 @@ async fn run_swarm(
                     }
                 }
             }
+
+            _ = reconnect_tick.tick() => {
+                reconnect_lost_bootstraps(&mut swarm, &state);
+            }
+        }
+    }
+}
+
+const BOOTSTRAP_RECONNECT_INTERVAL: Duration = Duration::from_secs(15);
+
+fn reconnect_lost_bootstraps(swarm: &mut Swarm<Y7Behaviour>, state: &TaskState) {
+    for (peer, addr) in &state.bootstrap_peers {
+        if swarm.is_connected(peer) {
+            continue;
+        }
+        match swarm.dial(addr.clone()) {
+            Ok(_) => debug!(%peer, %addr, "redialing lost bootstrap"),
+            Err(e) => debug!(%peer, %addr, error = %e, "bootstrap redial failed"),
         }
     }
 }
@@ -466,6 +492,11 @@ async fn handle_swarm_event(
 
         SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
             info!(%peer_id, ?cause, "connection closed");
+            // Bootstrap dropped — clear the relay-reservation guard so
+            // the next reconnect re-runs `listen_on(<addr>/p2p-circuit)`.
+            if state.bootstrap_peers.contains_key(&peer_id) {
+                state.relay_reserved.remove(&peer_id);
+            }
             emit(event_tx, NetEvent::ConnectionClosed { peer: peer_id });
         }
 
