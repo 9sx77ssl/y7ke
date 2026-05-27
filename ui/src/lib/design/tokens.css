@@ -40,6 +40,10 @@
   --y7-blue: #60a5fa;
   --y7-blue-soft: rgba(96, 165, 250, 0.12);
 
+  /* Amber tone reserved for warning surfaces (e.g. slow latency badges). */
+  --y7-warn: hsl(45, 90%, 55%);
+  --y7-warn-soft: hsla(45, 90%, 55%, 0.14);
+
   /* Semantic aliases for connection-kind labels (V2-A4). Online states
    * (LAN/Internet/Direct) reuse the green; Relay uses a muted lavender
    * so the user can tell at a glance that traffic flows through a third
