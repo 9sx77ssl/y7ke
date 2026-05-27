@@ -2,6 +2,26 @@
 
 Append-only ADR log. Newest at the top.
 
+## ADR-007 — UI store modules use `.svelte.ts` extension
+
+**Date:** 2026-05-27 · **Status:** Accepted
+
+**Context.** The frontend brief listed `src/lib/stores/*.ts` as plain TypeScript modules using Svelte 5 rune syntax (`$state`, `$derived`, `$effect`). However, `vite-plugin-svelte` only invokes `svelte.compileModule()` on files whose name contains the infix `.svelte.` (default `DEFAULT_SVELTE_MODULE_INFIX = ['.svelte.']`). A `.ts` file would emit `$state` as a literal identifier and crash at runtime.
+
+**Decision.** Renamed all store modules from `<name>.ts` to `<name>.svelte.ts` (`identity.svelte.ts`, `contacts.svelte.ts`, `requests.svelte.ts`, `chat.svelte.ts`, `presence.svelte.ts`, `events.svelte.ts`, `route.svelte.ts`). Reactive state is exposed via a frozen accessor object (e.g. `export const contacts = { get items() { return state.items; }, ... }`) — the underlying `$state(...)` value is module-private, so callers can't mutate it accidentally.
+
+**Consequences.** TypeScript still resolves the rune globals (they're declared at file scope in `svelte/types/index.d.ts` which is pulled in by `main.ts`'s `mount` import). Stores work in both the Vite dev server and the production build (`vite build`). The accessor-object pattern preserves a `writable()`-like ergonomic shape without the legacy `subscribe()` API.
+
+## ADR-008 — UI events arrive on one Tauri channel, fanned out by `kind`
+
+**Date:** 2026-05-27 · **Status:** Accepted
+
+**Context.** The backend emits eight distinct domain events (identity, contacts, requests, messages, presence, errors). Listening on eight separate Tauri events from the UI is verbose, requires eight handler registrations, and leaks the protocol surface across stores.
+
+**Decision.** A single Tauri event channel `"y7ke://event"` carries an `AppEvent` tagged union (`{ kind, ...payload }` with `serde(tag = "kind", rename_all = "snake_case")`). The UI registers exactly one listener in `events.svelte.ts` (`startEventDispatch`) and switches on `kind` to route into per-store apply functions.
+
+**Consequences.** Adding a new event variant requires exactly two touch points: a new arm in the Rust `AppEvent` enum and a new arm in `dispatch()` in `events.svelte.ts`. No new Tauri event channel names to coordinate. The cost is a slightly less type-safe handler shape (the discriminator union must be narrowed at runtime), but the TypeScript switch on `ev.kind` over a discriminated union recovers exhaustiveness.
+
 ## ADR-001 — V1 ships LAN-only, 4-crate workspace
 
 **Date:** 2026-05-27 · **Status:** Accepted
