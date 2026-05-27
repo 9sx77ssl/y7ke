@@ -1,0 +1,9 @@
+//! DAO modules — one per table.
+
+pub mod contacts;
+pub mod messages;
+pub mod peer_state;
+pub mod requests;
+pub mod sessions;
+pub mod sync_queue;
+pub mod users;
