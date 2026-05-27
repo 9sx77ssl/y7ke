@@ -127,7 +127,11 @@ Bootstraps are sourced in this order, first non-empty wins:
      "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…",
    ]
    ```
-3. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded at build time.
+3. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded at build time. Current
+   default ships one node: `bootstrap1.y7v.lol` (Germany), PeerId
+   `12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`. Falls back
+   to raw IP `/ip4/89.35.130.67/tcp/4101/…` if the DNS record isn't
+   pointing yet.
 
 Want to run your own bootstrap? The standalone daemon lives in a
 separate repo: <https://github.com/9sx77ssl/y7ke-bootstrap>.

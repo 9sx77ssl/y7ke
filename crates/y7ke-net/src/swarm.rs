@@ -34,14 +34,16 @@ use crate::handle::{
 };
 use crate::protocol::{HandshakeResp, MsgResp, SyncResp};
 
-/// Bootstrap peer multiaddrs hardcoded into release builds. Populated
-/// after the first internet-mode deploy captures a stable bootstrap
-/// node's PeerId; left empty by default so `cargo test` and dev
-/// environments don't try to dial anything they shouldn't.
+/// Bootstrap peer multiaddrs hardcoded into release builds. Each entry
+/// is an independent stable peer with its own PeerId — there's no
+/// clustering and no shared state. Kad replicates routing between
+/// whichever entries the client reaches.
 ///
 /// The application layer (`y7ke-app::Config::load`) overrides this from
 /// `~/.config/y7ke/bootstrap.toml` or the `Y7KE_BOOTSTRAP` env var.
-pub const DEFAULT_BOOTSTRAPS: &[&str] = &[];
+pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
+    "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo",
+];
 
 /// Default listen address (random TCP port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
@@ -198,6 +200,9 @@ async fn run_swarm(
     }
 }
 
+/// Oneshot slot for an in-flight Kad `FindPeer` query.
+type PendingFind = (PeerId, oneshot::Sender<Result<Vec<Multiaddr>, AppError>>);
+
 /// Cached state for the swarm task — never escapes the task.
 #[derive(Default)]
 struct TaskState {
@@ -215,8 +220,7 @@ struct TaskState {
     /// Pending `FindPeer` queries — keyed by Kad `QueryId`. Each entry
     /// is the target PeerId we're looking for and the oneshot to
     /// resolve when the addresses are known (or the query completes).
-    pending_find_peer:
-        HashMap<kad::QueryId, (PeerId, oneshot::Sender<Result<Vec<Multiaddr>, AppError>>)>,
+    pending_find_peer: HashMap<kad::QueryId, PendingFind>,
 
     /// True once `kad.start_providing(self)` has been issued. Deferred
     /// until the routing table has at least one peer — calling it
@@ -550,26 +554,27 @@ fn handle_kad(
         kad::Event::OutboundQueryProgressed {
             id, result, step, ..
         } => {
-            if let kad::QueryResult::GetProviders(Ok(ok)) = &result {
-                if let kad::GetProvidersOk::FoundProviders { providers, .. } = ok {
-                    // Borrow target separately from the mutable remove() below.
-                    let target = state.pending_find_peer.get(&id).map(|(t, _)| *t);
-                    if let Some(target) = target {
-                        if providers.contains(&target) {
-                            let addrs =
-                                state.address_book.get(&target).cloned().unwrap_or_default();
-                            if !addrs.is_empty() {
-                                if let Some((_, tx)) = state.pending_find_peer.remove(&id) {
-                                    debug!(%target, addr_count = addrs.len(), "find_peer: resolved via Kad");
-                                    let _ = tx.send(Ok(addrs));
-                                }
+            if let kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
+                providers,
+                ..
+            })) = &result
+            {
+                // Borrow target separately from the mutable remove() below.
+                let target = state.pending_find_peer.get(&id).map(|(t, _)| *t);
+                if let Some(target) = target {
+                    if providers.contains(&target) {
+                        let addrs = state.address_book.get(&target).cloned().unwrap_or_default();
+                        if !addrs.is_empty() {
+                            if let Some((_, tx)) = state.pending_find_peer.remove(&id) {
+                                debug!(%target, addr_count = addrs.len(), "find_peer: resolved via Kad");
+                                let _ = tx.send(Ok(addrs));
                             }
-                            // If we matched the target but don't yet
-                            // have their addresses in the address_book,
-                            // wait for `RoutingUpdated` to populate
-                            // them; the query's final step (below) will
-                            // give up if nothing arrives.
                         }
+                        // If we matched the target but don't yet have
+                        // their addresses in the address_book, wait for
+                        // `RoutingUpdated` to populate them; the
+                        // query's final step (below) will give up if
+                        // nothing arrives.
                     }
                 }
             }
