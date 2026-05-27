@@ -7,6 +7,14 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.34] — 2026-05-28
+
+- feat(ui): Toggle chip primitive and warn color token
+
+## [0.1.33] — 2026-05-27
+
+- fix(app): dedup outgoing pending requests per peer
+
 ## [0.1.32] — 2026-05-27
 
 - fix(app): discovery step 1 now reports whether a dial was actually issued

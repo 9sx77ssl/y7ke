@@ -15,6 +15,7 @@ import {
   type MessageView,
   type RequestView,
 } from "./types";
+import type { BootstrapEntry, Settings } from "./types-settings-stub";
 
 function normalizeError(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -109,6 +110,28 @@ export function listMessages(
 
 export function sendMessage(toY7Id: string, text: string): Promise<string> {
   return call<string>("send_message", { toY7Id, text });
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+
+export function getSettings(): Promise<Settings> {
+  return call<Settings>("get_settings");
+}
+
+export function updateSettings(settings: Settings): Promise<void> {
+  return call<void>("update_settings", { settings });
+}
+
+export function listBootstraps(): Promise<BootstrapEntry[]> {
+  return call<BootstrapEntry[]>("list_bootstraps");
+}
+
+export function pingAllBootstraps(): Promise<BootstrapEntry[]> {
+  return call<BootstrapEntry[]>("ping_all_bootstraps");
+}
+
+export function selectBestBootstrap(): Promise<string | null> {
+  return call<string | null>("select_best_bootstrap");
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────
