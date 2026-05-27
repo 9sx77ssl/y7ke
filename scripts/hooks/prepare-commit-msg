@@ -28,11 +28,12 @@ entry="## [$version] — $today
 "
 
 if [ -f CHANGELOG.md ]; then
-  # Insert after the first H1 (## [Unreleased] or the title) so newest stays on top.
+  # Insert right above the first existing version section so the newest
+  # entry stays on top of the version list (under the title + preamble).
   tmp=$(mktemp)
   awk -v entry="$entry" '
     BEGIN { inserted = 0 }
-    /^# / && !inserted { print; print ""; print entry; inserted = 1; next }
+    /^## \[/ && !inserted { print entry; inserted = 1 }
     { print }
     END { if (!inserted) print entry }
   ' CHANGELOG.md > "$tmp"

@@ -7,6 +7,12 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.1] — 2026-05-27
+
+- chore: production-grade repo cleanup (rename binary to `y7ke`, enable
+  WebKit devtools, faster CI via prebuilt tauri-cli, CHANGELOG +
+  pre-commit hooks, drop V1-era docs)
+
 ## [0.1.0] — 2026-05-27
 
 Initial pre-release covering the V1 LAN end-to-end product plus a first
@@ -36,7 +42,6 @@ slice of V2 hardening:
 ### Known limitations
 - LAN-only discovery (mDNS); internet routing (Kademlia + relay +
   AutoNAT + DCUtR + QUIC) lands in 0.2.x.
-- Master DEK in file mode 0600, not OS keyring (CR2 in
-  [`docs/ROADMAP.md`](docs/ROADMAP.md)).
-- Static session key — no forward secrecy yet (CR1, Double Ratchet
-  scheduled for 0.2.x).
+- Master DEK in file mode 0600, not OS keyring.
+- Static session key — no forward secrecy yet (Double Ratchet scheduled
+  for 0.2.x).
