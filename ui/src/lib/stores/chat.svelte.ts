@@ -45,6 +45,11 @@ const state = $state<ChatState>({
   error: null,
 });
 
+// Monotonic counter: only the latest openConversation may overwrite
+// state.messages. Without this an in-flight load could clobber an optimistic
+// placeholder that sendText added during the await window.
+let loadGen = 0;
+
 export const chat = {
   get peerY7Id(): string | null {
     return state.peerY7Id;
@@ -85,18 +90,29 @@ export const chat = {
  * surfaces in `state.error` and the composer is still usable.
  */
 export async function openConversation(peerY7Id: string): Promise<void> {
+  const myGen = ++loadGen;
   state.peerY7Id = peerY7Id;
   state.conversationId = null;
   state.messages = [];
   state.error = null;
   state.loading = true;
   try {
-    // In V1 the conversation_id is a 16-byte hex; the backend exposes it on
-    // each MessageView. We pass the peer y7_id and let the backend resolve.
-    // If the backend hasn't wired this yet the call rejects -> shown inline.
     const items = await rpcListMessages(peerY7Id, PAGE_LIMIT);
-    if (state.peerY7Id !== peerY7Id) return; // user switched while loading
-    state.messages = items;
+    // Bail if a newer load has started OR the user switched peers.
+    if (state.peerY7Id !== peerY7Id || myGen !== loadGen) return;
+
+    // Merge with anything added to state.messages during the await window —
+    // optimistic placeholders from sendText, or message_received events that
+    // arrived before the load resolved. Otherwise a slow list_messages would
+    // silently wipe the user's freshly-sent message from the UI.
+    const itemIds = new Set(items.map((m) => m.message_id));
+    const localOnly = state.messages.filter((m) => !itemIds.has(m.message_id));
+    state.messages = [...items, ...localOnly].sort(
+      (a, b) => a.timestamp_ms - b.timestamp_ms,
+    );
+
+    // Only adopt a conversation_id from a real server item; placeholders
+    // carry "" and would otherwise poison the event filter.
     if (items.length > 0) {
       state.conversationId = items[0]!.conversation_id;
     }

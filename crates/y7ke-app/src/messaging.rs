@@ -159,6 +159,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn derive_conv_key_is_symmetric() {
+        let alice = SigningKey::generate();
+        let bob = SigningKey::generate();
+        let alice_pub = alice.verifying_key().to_bytes();
+        let bob_pub = bob.verifying_key().to_bytes();
+        let conv_id = b"deadbeefcafebabe";
+
+        let alice_key = derive_conv_key(&alice, &bob_pub, conv_id).unwrap();
+        let bob_key = derive_conv_key(&bob, &alice_pub, conv_id).unwrap();
+
+        assert_eq!(
+            alice_key.as_bytes(),
+            bob_key.as_bytes(),
+            "static DH must produce identical keys on both sides"
+        );
+    }
+
+    #[test]
+    fn static_dh_round_trip() {
+        let alice = SigningKey::generate();
+        let bob = SigningKey::generate();
+        let alice_pub = alice.verifying_key().to_bytes();
+        let bob_pub = bob.verifying_key().to_bytes();
+        let conv_id = b"deadbeefcafebabe";
+
+        let alice_key = derive_conv_key(&alice, &bob_pub, conv_id).unwrap();
+        let bob_key = derive_conv_key(&bob, &alice_pub, conv_id).unwrap();
+
+        // Alice seals with her view of the key; Bob opens with his.
+        let (_mid, env, _ts) = seal_outgoing(&alice, &alice_pub, &alice_key, "hello bob").unwrap();
+        let pt = open_envelope(&env, &alice.verifying_key(), &bob_key).unwrap();
+        match pt {
+            PlaintextKind::Text(t) => assert_eq!(t, "hello bob"),
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[test]
     fn text_round_trip() {
         let me = SigningKey::generate();
         let pub_bytes = me.verifying_key().to_bytes();

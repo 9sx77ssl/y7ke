@@ -103,7 +103,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-    user-select: all;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .hint {
     flex-shrink: 0;
