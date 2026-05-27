@@ -47,6 +47,19 @@ impl SigningKey {
             inner: self.inner.sign(message),
         }
     }
+
+    /// Derive the X25519 scalar from this Ed25519 seed.
+    /// Uses SHA-512(seed)[..32] with RFC 7748 clamping — same scalar as signing.
+    pub fn to_x25519_scalar(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha512};
+        let hash = Sha512::digest(self.inner.to_bytes());
+        let mut scalar = [0u8; 32];
+        scalar.copy_from_slice(&hash[..32]);
+        scalar[0] &= 248;
+        scalar[31] &= 127;
+        scalar[31] |= 64;
+        scalar
+    }
 }
 
 /// Long-term verification key (the "public key" half).
@@ -70,6 +83,11 @@ impl VerifyingKey {
         self.inner
             .verify(message, &signature.inner)
             .map_err(|_| AppError::InvalidSignature)
+    }
+
+    /// Convert this Ed25519 public key to its X25519 (Montgomery) form.
+    pub fn to_x25519_public(&self) -> [u8; 32] {
+        self.inner.to_montgomery().to_bytes()
     }
 }
 

@@ -25,7 +25,7 @@ zeroize    = { workspace = true }
 
 # Crypto primitives.
 ed25519-dalek    = { workspace = true, features = ["rand_core", "zeroize"] }
-x25519-dalek     = { workspace = true, features = ["zeroize"] }
+x25519-dalek     = { workspace = true, features = ["zeroize", "static_secrets"] }
 chacha20poly1305 = { workspace = true }
 hkdf             = { workspace = true }
 sha2             = { workspace = true }

@@ -83,6 +83,7 @@
   }
   .text {
     white-space: pre-wrap;
+    -webkit-user-select: text;
     user-select: text;
   }
   .meta {

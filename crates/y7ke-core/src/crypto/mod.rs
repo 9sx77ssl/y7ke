@@ -8,6 +8,6 @@ pub mod kdf;
 pub mod signing;
 
 pub use aead::{generate_nonce, SymmetricKey, NONCE_LEN};
-pub use exchange::{EphemeralSecret, ExchangePublicKey, SharedSecret};
+pub use exchange::{EphemeralSecret, ExchangePublicKey, SharedSecret, StaticKey};
 pub use kdf::hkdf_sha256;
 pub use signing::{Signature, SigningKey, VerifyingKey};

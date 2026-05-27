@@ -24,33 +24,23 @@ impl AppHandle {
             .messages()
             .list_for_conversation(&conv, limit)
             .await?;
+        let conv_key = messaging::derive_conv_key(&self.inner.me, peer.pubkey(), conv.as_bytes())?;
         let mut out = Vec::with_capacity(rows.len());
         for m in rows {
             let sender_y7 = Y7Id::from_pubkey(m.sender_pub);
-            let session_owner = if m.sender_pub == self.inner.my_pubkey {
-                Y7Id::from_pubkey(m.recipient_pub)
-            } else {
-                sender_y7
+            let verifying = y7ke_core::crypto::VerifyingKey::from_bytes(&m.sender_pub)?;
+            let envelope = y7ke_net::protocol::MessageEnvelope {
+                message_id: *m.message_id.as_bytes(),
+                sender_pub: m.sender_pub,
+                timestamp_ms: m.timestamp_ms,
+                nonce: m.payload_nonce,
+                ciphertext: m.payload_enc.clone(),
+                sig: m.sig,
             };
-            let session = self.inner.db.sessions().get(&session_owner).await?;
-            let text = match session {
-                Some(s) => {
-                    let verifying = y7ke_core::crypto::VerifyingKey::from_bytes(&m.sender_pub)?;
-                    let envelope = y7ke_net::protocol::MessageEnvelope {
-                        message_id: *m.message_id.as_bytes(),
-                        sender_pub: m.sender_pub,
-                        timestamp_ms: m.timestamp_ms,
-                        nonce: m.payload_nonce,
-                        ciphertext: m.payload_enc.clone(),
-                        sig: m.sig,
-                    };
-                    match messaging::open_envelope(&envelope, &verifying, &s.session_key) {
-                        Ok(messaging::PlaintextKind::Text(t)) => t,
-                        Ok(messaging::PlaintextKind::Control(_)) => continue,
-                        Err(_) => "<decryption failed>".into(),
-                    }
-                }
-                None => "<no session>".into(),
+            let text = match messaging::open_envelope(&envelope, &verifying, &conv_key) {
+                Ok(messaging::PlaintextKind::Text(t)) => t,
+                Ok(messaging::PlaintextKind::Control(_)) => continue,
+                Err(_) => "<decryption failed>".into(),
             };
             out.push(MessageView {
                 message_id: m.message_id.to_string(),
@@ -95,18 +85,19 @@ impl AppHandle {
             )));
         }
         let peer_id = peer_id_from_y7(&to)?;
-        let session = self.inner.db.sessions().get(&to).await?.ok_or_else(|| {
-            AppError::invalid_input(format!(
+        if self.inner.db.sessions().get(&to).await?.is_none() {
+            return Err(AppError::invalid_input(format!(
                 "no established session with {to} — add them as a contact first"
-            ))
-        })?;
+            )));
+        }
+        let conversation_id = ConversationId::between(&self.inner.my_y7_id, &to);
+        let conv_key = messaging::derive_conv_key(&self.inner.me, to.pubkey(), conversation_id.as_bytes())?;
         let (message_id, envelope, timestamp_ms) = messaging::seal_outgoing(
             &self.inner.me,
             &self.inner.my_pubkey,
-            &session.session_key,
+            &conv_key,
             &text,
         )?;
-        let conversation_id = ConversationId::between(&self.inner.my_y7_id, &to);
 
         self.inner
             .db

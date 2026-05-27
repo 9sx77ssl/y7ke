@@ -14,6 +14,11 @@ body,
   height: 100%;
 }
 
+#app {
+  border-radius: var(--y7-r-lg);
+  overflow: hidden;
+}
+
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -28,6 +33,7 @@ body {
   color: var(--y7-text-primary);
   background: var(--y7-bg-base);
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -94,6 +100,7 @@ a:hover {
 input,
 textarea,
 [data-selectable] {
+  -webkit-user-select: text;
   user-select: text;
 }
 

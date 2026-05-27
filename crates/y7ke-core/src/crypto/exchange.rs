@@ -1,7 +1,7 @@
 //! X25519 ephemeral key exchange for session establishment.
 
 use rand::rngs::OsRng;
-use x25519_dalek::{EphemeralSecret as DalekEph, PublicKey as DalekPub};
+use x25519_dalek::{EphemeralSecret as DalekEph, PublicKey as DalekPub, StaticSecret as DalekStatic};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{AppError, Result};
@@ -64,6 +64,27 @@ impl SharedSecret {
 
     pub fn as_bytes(&self) -> &[u8; SHARED_SECRET_LEN] {
         &self.bytes
+    }
+}
+
+/// Reusable X25519 key derived from the Ed25519 identity scalar.
+/// Never stored — always derived on demand via `SigningKey::to_x25519_scalar`.
+pub struct StaticKey {
+    inner: DalekStatic,
+}
+
+impl StaticKey {
+    pub fn from_scalar(scalar: [u8; 32]) -> Self {
+        Self {
+            inner: DalekStatic::from(scalar),
+        }
+    }
+
+    pub fn diffie_hellman(&self, peer: &ExchangePublicKey) -> SharedSecret {
+        let shared = self.inner.diffie_hellman(&peer.inner);
+        let mut out = [0u8; SHARED_SECRET_LEN];
+        out.copy_from_slice(shared.as_bytes());
+        SharedSecret { bytes: out }
     }
 }
 

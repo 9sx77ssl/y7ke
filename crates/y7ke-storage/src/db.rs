@@ -70,7 +70,8 @@ impl Db {
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(SqliteSynchronous::Normal)
-            .foreign_keys(true);
+            .foreign_keys(true)
+            .pragma("secure_delete", "ON");
 
         let pool = SqlitePoolOptions::new()
             .max_connections(8)
@@ -125,7 +126,7 @@ impl Db {
     }
 
     pub fn sessions(&self) -> dao::sessions::SessionsDao<'_> {
-        dao::sessions::SessionsDao::new(&self.pool, &self.dek)
+        dao::sessions::SessionsDao::new(&self.pool)
     }
 
     pub fn sync_queue(&self) -> dao::sync_queue::SyncQueueDao<'_> {

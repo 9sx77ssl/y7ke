@@ -3,7 +3,7 @@
 //! and reopen to verify durability.
 
 use tempfile::TempDir;
-use y7ke_core::crypto::{SigningKey, SymmetricKey};
+use y7ke_core::crypto::SigningKey;
 use y7ke_core::{ContactStatus, ConversationId, MessageId, MessageStatus, Y7Id};
 use y7ke_storage::dao::contacts::NewContact;
 use y7ke_storage::dao::messages::NewMessage;
@@ -156,28 +156,20 @@ async fn messages_insert_or_ignore_dedups() {
 }
 
 #[tokio::test]
-async fn sessions_round_trip_encrypted() {
+async fn sessions_round_trip() {
     let dir = TempDir::new().unwrap();
     let db = Db::open(DbConfig::in_dir(dir.path())).await.unwrap();
 
     let peer = Y7Id::from_pubkey([4u8; 32]);
-    let session_key = SymmetricKey::new([0xabu8; 32]);
-    db.sessions()
-        .upsert(&peer, session_key.clone())
-        .await
-        .unwrap();
+    db.sessions().upsert(&peer).await.unwrap();
 
     let got = db.sessions().get(&peer).await.unwrap().unwrap();
-    assert_eq!(got.session_key.as_bytes(), session_key.as_bytes());
+    assert_eq!(got.peer_y7_id, peer);
+    assert!(got.established_at > 0);
 
-    // On-disk ciphertext must differ from plaintext.
-    let raw: (Vec<u8>,) =
-        sqlx::query_as("SELECT shared_secret_enc FROM sessions WHERE peer_y7_id = ?")
-            .bind(peer.to_uri())
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
-    assert_ne!(&raw.0[..32], session_key.as_bytes());
+    // No session for an unknown peer.
+    let other = Y7Id::from_pubkey([5u8; 32]);
+    assert!(db.sessions().get(&other).await.unwrap().is_none());
 }
 
 #[tokio::test]

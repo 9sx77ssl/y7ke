@@ -165,15 +165,11 @@ async fn handle_handshake(
         return Ok(());
     }
 
-    let (resp, session_key, initiator_y7) =
+    let (resp, _session_key, initiator_y7) =
         handshake::respond(&inner.me, &inner.my_pubkey, &request)?;
     debug_assert_eq!(initiator_y7, claimed_id, "respond() must derive same Y7Id");
 
-    inner
-        .db
-        .sessions()
-        .upsert(&initiator_y7, session_key)
-        .await?;
+    inner.db.sessions().upsert(&initiator_y7).await?;
 
     // Upsert pending-in contact (only if new).
     let existing = inner.db.contacts().get(&initiator_y7).await?;
@@ -273,15 +269,13 @@ async fn handle_msg(
     }
 
     // Need a session — established by an earlier handshake.
-    let session = inner
-        .db
-        .sessions()
-        .get(&sender_y7)
-        .await?
-        .ok_or_else(|| AppError::network(format!("no session for {sender_y7}")))?;
-
+    if inner.db.sessions().get(&sender_y7).await?.is_none() {
+        return Err(AppError::network(format!("no session for {sender_y7}")));
+    }
+    let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
+    let conv_key = messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
     let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
-    let kind = messaging::open_envelope(&envelope, &verifying, &session.session_key)?;
+    let kind = messaging::open_envelope(&envelope, &verifying, &conv_key)?;
 
     // Control payloads don't land in `messages` — dispatch inline.
     let text = match kind {
@@ -295,8 +289,6 @@ async fn handle_msg(
             return Ok(());
         }
     };
-
-    let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
 
     // Persist (INSERT OR IGNORE → dedup).
     let inserted = inner
@@ -759,14 +751,13 @@ async fn ingest_synced_envelope(
         return Ok(false);
     }
 
-    let session = inner
-        .db
-        .sessions()
-        .get(&sender_y7)
-        .await?
-        .ok_or_else(|| AppError::network(format!("no session for {sender_y7}")))?;
+    if inner.db.sessions().get(&sender_y7).await?.is_none() {
+        return Err(AppError::network(format!("no session for {sender_y7}")));
+    }
+    let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
+    let conv_key = messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
     let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
-    let kind = messaging::open_envelope(envelope, &verifying, &session.session_key)?;
+    let kind = messaging::open_envelope(envelope, &verifying, &conv_key)?;
     let text = match kind {
         messaging::PlaintextKind::Text(t) => t,
         messaging::PlaintextKind::Control(_) => {
@@ -774,8 +765,6 @@ async fn ingest_synced_envelope(
             return Ok(false);
         }
     };
-
-    let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
     let inserted = inner
         .db
         .messages()

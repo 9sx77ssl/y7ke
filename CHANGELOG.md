@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.4] — 2026-05-27
+
+- fix: Sending stays Sending on retry-queue; no red bubble background
+
 ## [0.1.3] — 2026-05-27
 
 - ci: rerun after repo went public

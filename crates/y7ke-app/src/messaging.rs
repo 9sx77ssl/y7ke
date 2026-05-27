@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use y7ke_core::crypto::{Signature, SigningKey, SymmetricKey, VerifyingKey};
+use y7ke_core::crypto::{hkdf_sha256, ExchangePublicKey, Signature, SigningKey, StaticKey, SymmetricKey, VerifyingKey};
 use y7ke_core::error::{AppError, Result};
 use y7ke_core::MessageId;
 use y7ke_net::protocol::MessageEnvelope;
@@ -37,6 +37,28 @@ pub fn signed_bytes(message_id: &[u8; 16], timestamp_ms: i64, ciphertext: &[u8])
     v.extend_from_slice(&timestamp_ms.to_le_bytes());
     v.extend_from_slice(ciphertext);
     v
+}
+
+pub const CONV_KDF_INFO: &[u8] = b"y7ke-conv-v1";
+
+/// Derive the per-conversation message key from static identity DH.
+/// Both parties compute the same key: HKDF(DH(my_static_x25519, peer_x25519_pub), conv_id).
+/// The key is never stored — derived fresh on every encrypt/decrypt.
+pub fn derive_conv_key(
+    me: &SigningKey,
+    peer_pub: &[u8; 32],
+    conv_id: &[u8],
+) -> Result<SymmetricKey> {
+    let scalar = me.to_x25519_scalar();
+    let static_key = StaticKey::from_scalar(scalar);
+    let peer_verifying = VerifyingKey::from_bytes(peer_pub)?;
+    let peer_x25519 = ExchangePublicKey::from_bytes(peer_verifying.to_x25519_public());
+    let shared = static_key.diffie_hellman(&peer_x25519);
+    let key_bytes = hkdf_sha256(conv_id, shared.as_bytes(), CONV_KDF_INFO, 32)?;
+    let arr: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| AppError::crypto("hkdf length mismatch"))?;
+    Ok(SymmetricKey::new(arr))
 }
 
 fn seal_kind(

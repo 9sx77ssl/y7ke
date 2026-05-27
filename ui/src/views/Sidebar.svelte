@@ -20,7 +20,6 @@
   import { toast } from "../lib/components/toast.svelte";
   import { log } from "../lib/log";
   import type { ConnectionKind } from "../lib/types";
-  import IconButton from "../lib/components/IconButton.svelte";
   import NavItem from "../lib/components/NavItem.svelte";
   import ContactRow from "../lib/components/ContactRow.svelte";
   import ContextMenu, {
@@ -130,33 +129,6 @@
 
   <div class="section-head">
     <span class="section-title">contacts</span>
-    <IconButton
-      size={22}
-      ariaLabel="refresh contacts"
-      title="refresh"
-      disabled={contacts.loading}
-      onclick={() => {
-        void refreshContacts();
-      }}
-    >
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-        <path
-          d="M2 6a4 4 0 0 1 6.9-2.8M10 6a4 4 0 0 1-6.9 2.8"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.2"
-          stroke-linecap="round"
-        />
-        <path
-          d="M9 1v3H6M3 11V8h3"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    </IconButton>
   </div>
 
   <ul class="contacts">
@@ -206,7 +178,7 @@
 <Modal
   bind:open={deleteOpen}
   title="delete chat"
-  description="this wipes messages, session, and contact on this device. the peer is notified to wipe theirs."
+  description="permanently deletes messages, session key, and contact on both sides — your copy is wiped now, and the peer's copy is wiped automatically the next time they come online."
   confirmLabel="delete"
   cancelLabel="cancel"
   tone="danger"

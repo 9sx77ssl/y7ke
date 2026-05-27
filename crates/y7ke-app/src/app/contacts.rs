@@ -65,9 +65,8 @@ impl AppHandle {
             greeting,
         );
         let resp = self.inner.net.send_handshake(peer_id, req).await?;
-        let session_key =
-            crate::handshake::finalize_initiator(eph, &self.inner.my_pubkey, peer.pubkey(), &resp)?;
-        self.inner.db.sessions().upsert(&peer, session_key).await?;
+        crate::handshake::finalize_initiator(eph, &self.inner.my_pubkey, peer.pubkey(), &resp)?;
+        self.inner.db.sessions().upsert(&peer).await?;
         Ok(())
     }
 
@@ -193,14 +192,19 @@ impl AppHandle {
 
     /// Fire-and-forget control via /y7ke/msg/1.0.0. Used by reject + delete.
     pub(crate) async fn send_control(&self, peer: &Y7Id, payload: messaging::ControlPayload) {
-        let Some(session) = self.inner.db.sessions().get(peer).await.ok().flatten() else {
+        if self.inner.db.sessions().get(peer).await.ok().flatten().is_none() {
             tracing::debug!(%peer, "no session for control — skipping");
+            return;
+        }
+        let conv = y7ke_core::ConversationId::between(&self.inner.my_y7_id, peer);
+        let Ok(conv_key) = messaging::derive_conv_key(&self.inner.me, peer.pubkey(), conv.as_bytes()) else {
+            tracing::warn!(%peer, "derive_conv_key failed for control");
             return;
         };
         let Ok((_mid, envelope, _ts)) = messaging::seal_control(
             &self.inner.me,
             &self.inner.my_pubkey,
-            &session.session_key,
+            &conv_key,
             &payload,
         ) else {
             tracing::warn!(%peer, "seal_control failed");
