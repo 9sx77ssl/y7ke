@@ -120,6 +120,11 @@ fn main() {
             commands::send_message,
             commands::log_from_ui,
             commands::boot_ready,
+            commands::get_settings,
+            commands::update_settings,
+            commands::list_bootstraps,
+            commands::ping_all_bootstraps,
+            commands::select_best_bootstrap,
         ])
         .run(tauri::generate_context!());
 

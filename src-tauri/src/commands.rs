@@ -6,6 +6,7 @@ use tauri::State;
 use tokio::sync::Notify;
 
 use y7ke_app::{AppHandle, ContactView, MessageView, RequestView};
+use y7ke_core::settings::{BootstrapEntry, Settings};
 use y7ke_core::Y7Id;
 
 /// Slot that holds an AppHandle once boot completes. Commands await
@@ -160,4 +161,29 @@ pub async fn send_message(app: S<'_>, to_y7_id: String, text: String) -> Result<
 #[tauri::command]
 pub async fn boot_ready(app: S<'_>) -> Result<bool, String> {
     Ok(app.try_get().await.is_some())
+}
+
+#[tauri::command]
+pub async fn get_settings(app: S<'_>) -> Result<Settings, String> {
+    app.get().await.get_settings().await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn update_settings(app: S<'_>, settings: Settings) -> Result<(), String> {
+    app.get().await.update_settings(settings).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn list_bootstraps(app: S<'_>) -> Result<Vec<BootstrapEntry>, String> {
+    app.get().await.list_bootstraps().await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn ping_all_bootstraps(app: S<'_>) -> Result<Vec<BootstrapEntry>, String> {
+    app.get().await.ping_all_bootstraps().await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn select_best_bootstrap(app: S<'_>) -> Result<Option<String>, String> {
+    Ok(app.get().await.select_best_bootstrap().await)
 }
