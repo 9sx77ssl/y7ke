@@ -75,11 +75,18 @@ impl AppHandle {
         tracing::info!(%peer, "discovery: starting chain");
 
         // 1. Fast path: mDNS / identify address book in the swarm.
-        if self.inner.net.dial(peer).await.is_ok() {
-            tracing::info!(%peer, "discovery: step 1 (swarm address book) issued dial");
-            return;
+        match self.inner.net.dial(peer).await {
+            Ok(true) => {
+                tracing::info!(%peer, "discovery: step 1 (swarm address book) issued dial");
+                return;
+            }
+            Ok(false) => {
+                tracing::info!(%peer, "discovery: step 1 — no known addresses in swarm");
+            }
+            Err(e) => {
+                tracing::warn!(%peer, error = %e, "discovery: step 1 — dial command failed");
+            }
         }
-        tracing::info!(%peer, "discovery: step 1 — no known addresses in swarm");
 
         // 2. Cached addrs from a previous session.
         if let Ok(Some(state)) = self.inner.db.peer_state().get(&peer).await {
@@ -117,8 +124,16 @@ impl AppHandle {
 
         // 4. Last resort: ask the swarm one more time — by now Kad may
         //    have populated its routing table.
-        if let Err(e) = self.inner.net.dial(peer).await {
-            tracing::warn!(%peer, error = %e, "discovery: all 4 paths exhausted — peer unreachable");
+        match self.inner.net.dial(peer).await {
+            Ok(true) => {
+                tracing::info!(%peer, "discovery: step 4 (re-check swarm) issued dial");
+            }
+            Ok(false) => {
+                tracing::warn!(%peer, "discovery: all 4 paths exhausted — peer unreachable");
+            }
+            Err(e) => {
+                tracing::warn!(%peer, error = %e, "discovery: step 4 dial command failed");
+            }
         }
     }
 

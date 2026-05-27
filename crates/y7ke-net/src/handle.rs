@@ -118,12 +118,23 @@ impl NetHandle {
 
     /// Fire-and-forget dial by `Y7Id`. The swarm task derives the libp2p
     /// `PeerId` from the contained Ed25519 public key and dials any
-    /// addresses currently known for it via mDNS / identify.
-    pub async fn dial(&self, y7_id: Y7Id) -> Result<(), AppError> {
+    /// addresses currently known for it via mDNS / identify. Returns
+    /// `Ok(true)` if a dial was issued, `Ok(false)` if the swarm has no
+    /// known addresses for the peer (caller should fall through to
+    /// discovery).
+    pub async fn dial(&self, y7_id: Y7Id) -> Result<bool, AppError> {
+        let (tx, rx) = oneshot::channel();
         self.cmd_tx
-            .send(NetCommand::Dial { y7_id })
+            .send(NetCommand::Dial {
+                y7_id,
+                response_tx: tx,
+            })
             .await
-            .map_err(|e| AppError::network(format!("command channel closed: {e}")))
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))?;
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(AppError::network("dial response channel dropped")),
+        }
     }
 
     /// Fire-and-forget dial of a fully-qualified `Multiaddr` (typically
@@ -304,8 +315,14 @@ impl NetHandle {
 pub enum NetCommand {
     /// Dial a known contact by their Y7 identifier (i.e. by their long-
     /// term Ed25519 public key). The swarm task derives the libp2p
-    /// `PeerId` and uses any cached addresses.
-    Dial { y7_id: Y7Id },
+    /// `PeerId` and uses any cached addresses. `response_tx` resolves to
+    /// `Ok(true)` if a dial was actually issued, `Ok(false)` if the
+    /// peer has no known addresses (so a fallback discovery path should
+    /// run), or `Err` on an invalid Y7Id.
+    Dial {
+        y7_id: Y7Id,
+        response_tx: oneshot::Sender<Result<bool, AppError>>,
+    },
     /// Dial an arbitrary, fully-qualified `Multiaddr`. The address is
     /// also recorded in the per-peer address book so subsequent
     /// `send_*` calls can re-use it.

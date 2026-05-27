@@ -292,29 +292,19 @@ fn handle_command(
     cmd: NetCommand,
 ) {
     match cmd {
-        NetCommand::Dial { y7_id } => {
+        NetCommand::Dial { y7_id, response_tx } => {
             let peer = match peer_id_from_y7(&y7_id) {
                 Ok(p) => p,
                 Err(e) => {
                     debug!(error = %e, "dial: invalid Y7Id pubkey");
-                    emit(
-                        event_tx,
-                        NetEvent::Error {
-                            message: e.to_string(),
-                        },
-                    );
+                    let _ = response_tx.send(Err(e));
                     return;
                 }
             };
             let addrs = state.address_book.get(&peer).cloned().unwrap_or_default();
             if addrs.is_empty() {
                 debug!(%peer, "dial requested but no addresses known");
-                emit(
-                    event_tx,
-                    NetEvent::Error {
-                        message: format!("no known addresses for {peer}"),
-                    },
-                );
+                let _ = response_tx.send(Ok(false));
                 return;
             }
             debug!(%peer, addr_count = addrs.len(), "dialing");
@@ -332,6 +322,7 @@ fn handle_command(
                     );
                 }
             }
+            let _ = response_tx.send(Ok(true));
         }
 
         NetCommand::FindPeer { y7_id, response_tx } => {
