@@ -126,9 +126,12 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
         .expect("alice's own message");
     assert!(
         MessageStatus::from_i64(alice_send.status)
-            .map(|s| matches!(s, MessageStatus::Sent | MessageStatus::Synced))
+            .map(|s| matches!(
+                s,
+                MessageStatus::Sent | MessageStatus::Delivered | MessageStatus::Synced
+            ))
             .unwrap_or(false),
-        "alice's outgoing message should be Sent or Synced, was {:?}",
+        "alice's outgoing message should be Sent/Delivered/Synced, was {:?}",
         alice_send.status
     );
 

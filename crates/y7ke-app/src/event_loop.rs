@@ -534,7 +534,7 @@ async fn drain_queue_for_peer(
                 inner
                     .db
                     .messages()
-                    .update_status(&message.message_id, MessageStatus::Synced)
+                    .update_status(&message.message_id, MessageStatus::Delivered)
                     .await?;
                 inner
                     .db
@@ -543,7 +543,7 @@ async fn drain_queue_for_peer(
                     .await?;
                 let _ = event_tx.send(AppEvent::MessageStatusChanged {
                     message_id: message.message_id.to_string(),
-                    status: MessageStatus::Synced,
+                    status: MessageStatus::Delivered,
                 });
             }
             Ok(_) | Err(_) => {

@@ -146,7 +146,7 @@ async fn push_one(
 ) {
     let result = tokio::time::timeout(SEND_TIMEOUT, inner.net.send_msg(peer_id, req)).await;
     let new_status = match result {
-        Ok(Ok(resp)) if resp.ack => MessageStatus::Synced,
+        Ok(Ok(resp)) if resp.ack => MessageStatus::Delivered,
         other => {
             tracing::warn!(?other, %to, "send_msg failed; enqueuing");
             let next = crate::event_loop::next_retry_at(0);

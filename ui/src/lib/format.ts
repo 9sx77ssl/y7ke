@@ -83,7 +83,7 @@ export function statusBadge(
     case 1:
       return { label: "Sent", glyph: "✓", tone: "muted" };
     case 2:
-      return { label: "Delivered", glyph: "✓✓", tone: "muted" };
+      return { label: "Delivered", glyph: "✓✓", tone: "ok" };
     case 3:
       return { label: "Synced", glyph: "✓✓", tone: "ok" };
     case 4:
