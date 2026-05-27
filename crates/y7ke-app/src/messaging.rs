@@ -17,6 +17,8 @@ pub const TAG_CONTROL: u8 = 0x01;
 pub enum ControlPayload {
     /// Peer rejected our contact request.
     RejectedRequest,
+    /// Peer accepted our contact request.
+    AcceptedRequest,
     /// Peer wiped this conversation; receiver should mirror the wipe.
     ChatDeleted,
 }

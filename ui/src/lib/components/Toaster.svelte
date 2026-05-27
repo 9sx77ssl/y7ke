@@ -14,7 +14,8 @@
   .toaster {
     position: fixed;
     left: 0;
-    bottom: 0;
+    /* Leave room for the sidebar footer ("N contacts" + safe gap). */
+    bottom: calc(var(--y7-sp-8) + var(--y7-sp-2));
     width: var(--y7-sz-sidebar);
     padding: var(--y7-sp-2);
     display: flex;

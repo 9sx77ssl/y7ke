@@ -1,6 +1,9 @@
-// Lightweight in-memory router for the main shell's center pane.
-// V1 has three view kinds — see `MainPane` below. Hash routing or any
-// browser-history-bound system would be overkill for a Tauri desktop app.
+// In-memory router for the main shell's center pane.
+
+import { closeConversation } from "./chat.svelte";
+import { log } from "../log";
+
+const logger = log("route");
 
 export type MainPane =
   | { kind: "empty" }
@@ -17,17 +20,26 @@ export const router = {
 };
 
 export function openEmpty(): void {
+  logger.debug("→ empty");
+  closeConversation();
   route.pane = { kind: "empty" };
 }
 
 export function openChatWith(peerY7Id: string): void {
+  logger.debug("→ chat", peerY7Id);
+  // Reset any stale chat-store state so the new chat starts fresh.
+  closeConversation();
   route.pane = { kind: "chat", peerY7Id };
 }
 
 export function openAddContact(): void {
+  logger.debug("→ add_contact");
+  closeConversation();
   route.pane = { kind: "add_contact" };
 }
 
 export function openRequests(): void {
+  logger.debug("→ requests");
+  closeConversation();
   route.pane = { kind: "requests" };
 }

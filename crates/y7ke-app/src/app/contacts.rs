@@ -73,6 +73,7 @@ impl AppHandle {
 
     pub async fn accept_request(&self, id: i64) -> Result<()> {
         let pending = self.find_request(id).await?;
+        let peer = pending.peer_y7_id;
         self.inner
             .db
             .requests()
@@ -81,14 +82,18 @@ impl AppHandle {
         self.inner
             .db
             .contacts()
-            .update_status(&pending.peer_y7_id, ContactStatus::Accepted)
+            .update_status(&peer, ContactStatus::Accepted)
             .await?;
+        // Tell the initiator they got accepted; without this they only learn
+        // about it via the first inbound message (B-fix from earlier turn).
+        self.send_control(&peer, messaging::ControlPayload::AcceptedRequest)
+            .await;
         let _ = self.event_tx.send(AppEvent::RequestResolved {
-            y7_id: pending.peer_y7_id.to_uri(),
+            y7_id: peer.to_uri(),
             resolution: RequestResolution::Accepted,
         });
         let _ = self.event_tx.send(AppEvent::ContactAdded {
-            y7_id: pending.peer_y7_id.to_uri(),
+            y7_id: peer.to_uri(),
         });
         Ok(())
     }

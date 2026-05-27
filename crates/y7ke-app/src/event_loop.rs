@@ -553,7 +553,6 @@ async fn handle_control(
     tracing::info!(%sender, ?ctrl, "control received");
     match ctrl {
         messaging::ControlPayload::RejectedRequest => {
-            // Mark outgoing request as Rejected, contact as Blocked.
             for r in inner.db.requests().list_pending(None).await? {
                 if r.peer_y7_id == sender {
                     let _ = inner
@@ -574,9 +573,37 @@ async fn handle_control(
                 resolution: y7ke_core::RequestResolution::Rejected,
             });
         }
+        messaging::ControlPayload::AcceptedRequest => {
+            for r in inner.db.requests().list_pending(None).await? {
+                if r.peer_y7_id == sender {
+                    let _ = inner
+                        .db
+                        .requests()
+                        .resolve(r.id, y7ke_core::RequestResolution::Accepted)
+                        .await;
+                }
+            }
+            inner
+                .db
+                .contacts()
+                .update_status(&sender, y7ke_core::ContactStatus::Accepted)
+                .await
+                .ok();
+            let _ = event_tx.send(AppEvent::RequestResolved {
+                y7_id: sender.to_uri(),
+                resolution: y7ke_core::RequestResolution::Accepted,
+            });
+            let _ = event_tx.send(AppEvent::ContactAdded {
+                y7_id: sender.to_uri(),
+            });
+        }
         messaging::ControlPayload::ChatDeleted => {
-            // Peer wiped the conversation; mirror locally.
+            // Peer wiped the conversation; mirror locally and tell UI to refresh.
             wipe_conversation(inner, &sender).await?;
+            let _ = event_tx.send(AppEvent::RequestResolved {
+                y7_id: sender.to_uri(),
+                resolution: y7ke_core::RequestResolution::Cancelled,
+            });
             let _ = event_tx.send(AppEvent::ContactAdded {
                 y7_id: sender.to_uri(),
             });
