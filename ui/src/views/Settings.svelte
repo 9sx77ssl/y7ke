@@ -31,11 +31,10 @@
 
   // Local editable rows; mirrors `settingsStore.bootstraps` plus optional
   // empty/in-progress rows the user has added with the "+ add" button.
-  // `last_ping_ms` is `bigint | null` because ts-rs maps Rust `u64` to bigint.
   interface Row {
     multiaddr: string;
     is_default: boolean;
-    last_ping_ms: bigint | null;
+    last_ping_ms: number | null;
     last_ping_failed: boolean;
   }
   let rows = $state<Row[]>([]);
@@ -219,11 +218,9 @@
       const okEntries = updated.filter(
         (b) => !b.last_ping_failed && b.last_ping_ms !== null,
       );
-      okEntries.sort((a, b) => {
-        const av = a.last_ping_ms ?? 9_999_999n;
-        const bv = b.last_ping_ms ?? 9_999_999n;
-        return av < bv ? -1 : av > bv ? 1 : 0;
-      });
+      okEntries.sort(
+        (a, b) => (a.last_ping_ms ?? Infinity) - (b.last_ping_ms ?? Infinity),
+      );
       const best = okEntries[0];
       if (best !== undefined && best.last_ping_ms !== null) {
         const host = extractHost(best.multiaddr) ?? best.multiaddr;
@@ -253,7 +250,7 @@
   function latencyClass(r: Row): "ok" | "warn" | "fail" | "muted" {
     if (r.last_ping_failed) return "fail";
     if (r.last_ping_ms === null) return "muted";
-    if (r.last_ping_ms <= 150n) return "ok";
+    if (r.last_ping_ms <= 150) return "ok";
     return "warn";
   }
 
