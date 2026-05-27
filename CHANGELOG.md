@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.2] — 2026-05-27
+
+- fix(hooks): insert CHANGELOG entry above the first version, not the title
+
 ## [0.1.1] — 2026-05-27
 
 - chore: production-grade repo cleanup (rename binary to `y7ke`, enable
