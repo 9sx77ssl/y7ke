@@ -40,6 +40,14 @@
   --y7-blue: #60a5fa;
   --y7-blue-soft: rgba(96, 165, 250, 0.12);
 
+  /* Semantic aliases for connection-kind labels (V2-A4). Online states
+   * (LAN/Internet/Direct) reuse the green; Relay uses a muted lavender
+   * so the user can tell at a glance that traffic flows through a third
+   * party — without it feeling alarming.
+   */
+  --y7-text-online: var(--y7-green);
+  --y7-text-relayed: hsl(280, 30%, 64%);
+
   /* ------------------------------------------------------------ borders */
   --y7-border-subtle: rgba(255, 255, 255, 0.06);
   --y7-border-default: rgba(255, 255, 255, 0.1);

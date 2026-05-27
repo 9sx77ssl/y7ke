@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { ConnectionKind } from "../gen/ConnectionKind";
   import type { StatusTone } from "./StatusDot.svelte";
 
   export interface ContactRowProps {
@@ -10,6 +11,9 @@
     /** Free-form tooltip — typically the full y7 id. */
     title: string;
     active?: boolean;
+    /** V2-A4: when set, renders a small uppercase transport-kind label
+     * (LAN / INTERNET / RELAY / DIRECT) next to the nickname. */
+    connectionKind?: ConnectionKind;
     onclick?: (e: MouseEvent) => void;
   }
 </script>
@@ -19,6 +23,7 @@
   // leading presence dot, full-width clickable surface. Not coverable by
   // <Button> which centers a single child.
 
+  import ConnectionLabel from "./ConnectionLabel.svelte";
   import StatusDot from "./StatusDot.svelte";
 
   let {
@@ -27,6 +32,7 @@
     presence,
     title,
     active = false,
+    connectionKind,
     onclick,
   }: ContactRowProps = $props();
 </script>
@@ -41,7 +47,12 @@
 >
   <StatusDot tone={presence} size={8} title={title} />
   <span class="meta">
-    <span class="label">{label}</span>
+    <span class="line">
+      <span class="label">{label}</span>
+      {#if connectionKind}
+        <ConnectionLabel kind={connectionKind} />
+      {/if}
+    </span>
     {#if sublabel}
       <span class="sublabel">{sublabel}</span>
     {/if}
@@ -85,12 +96,19 @@
     gap: 1px;
     flex: 1;
   }
+  .line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--y7-sp-2);
+    min-width: 0;
+  }
   .label {
     font-size: var(--y7-fs-md);
     font-weight: var(--y7-fw-medium);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
   .sublabel {
     font-size: var(--y7-fs-xs);

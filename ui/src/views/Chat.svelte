@@ -14,6 +14,7 @@
   import { truncateY7Id } from "../lib/format";
   import { log } from "../lib/log";
   import Button from "../lib/components/Button.svelte";
+  import ConnectionLabel from "../lib/components/ConnectionLabel.svelte";
   import KeyDisplay from "../lib/components/KeyDisplay.svelte";
   import MessageBubble from "../lib/components/MessageBubble.svelte";
   import StatusDot from "../lib/components/StatusDot.svelte";
@@ -101,7 +102,7 @@
       <span class="name" title={contact?.nickname ?? peerY7Id}>
         {displayName}
       </span>
-      <span class="presence">{presenceLabel(presence).toLowerCase()}</span>
+      <ConnectionLabel kind={presence} />
     </div>
     {#if hasNickname}
       <div class="head-right">
@@ -204,13 +205,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
-  }
-  .presence {
-    font-size: var(--y7-fs-xs);
-    color: var(--y7-text-muted);
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
   }
   .head-right {
     flex-shrink: 0;

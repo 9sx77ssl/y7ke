@@ -157,6 +157,7 @@
           label={c.nickname ?? truncateY7Id(c.y7_id, 8, 6)}
           sublabel={pending ?? (c.nickname ? truncateY7Id(c.y7_id, 6, 4) : undefined)}
           presence={pending ? "connecting" : dotTone(presence)}
+          connectionKind={pending ? undefined : presence}
           title="{c.y7_id}{pending ? ` — ${pending}` : ` — ${presenceLabel(presence)}`}"
           active={isOpen(c.y7_id)}
           onclick={() => openChatWith(c.y7_id)}
