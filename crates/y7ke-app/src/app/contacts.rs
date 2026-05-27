@@ -72,17 +72,24 @@ impl AppHandle {
     /// → Kademlia DHT lookup → direct dial. All four steps are best-
     /// effort; any successful dial enqueues a handshake later.
     async fn dial_with_discovery(&self, peer: Y7Id) {
+        tracing::info!(%peer, "discovery: starting chain");
+
         // 1. Fast path: mDNS / identify address book in the swarm.
         if self.inner.net.dial(peer).await.is_ok() {
+            tracing::info!(%peer, "discovery: step 1 (swarm address book) issued dial");
             return;
         }
+        tracing::info!(%peer, "discovery: step 1 — no known addresses in swarm");
+
         // 2. Cached addrs from a previous session.
         if let Ok(Some(state)) = self.inner.db.peer_state().get(&peer).await {
             if let Some(json) = state.last_addrs_json {
                 if let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) {
+                    tracing::info!(%peer, count = addrs.len(), "discovery: step 2 — trying cached addrs");
                     for s in addrs {
                         if let Ok(m) = s.parse::<libp2p::Multiaddr>() {
                             if self.inner.net.dial_address(m).await.is_ok() {
+                                tracing::info!(%peer, "discovery: step 2 cached addr dial issued");
                                 return;
                             }
                         }
@@ -90,10 +97,13 @@ impl AppHandle {
                 }
             }
         }
+
         // 3. Kad lookup. find_peer either resolves to addrs we can dial
         //    or returns NotFound after a 10 s window.
+        tracing::info!(%peer, "discovery: step 3 — Kad get_providers query");
         match self.inner.net.find_peer(peer).await {
             Ok(addrs) => {
+                tracing::info!(%peer, count = addrs.len(), "discovery: step 3 Kad returned addrs");
                 for addr in addrs {
                     if self.inner.net.dial_address(addr).await.is_ok() {
                         return;
@@ -101,13 +111,14 @@ impl AppHandle {
                 }
             }
             Err(e) => {
-                tracing::debug!(%peer, error = %e, "find_peer via Kad failed");
+                tracing::warn!(%peer, error = %e, "discovery: step 3 — Kad lookup failed (peer not in DHT or unreachable)");
             }
         }
+
         // 4. Last resort: ask the swarm one more time — by now Kad may
         //    have populated its routing table.
         if let Err(e) = self.inner.net.dial(peer).await {
-            tracing::warn!(%peer, error = %e, "all discovery paths exhausted");
+            tracing::warn!(%peer, error = %e, "discovery: all 4 paths exhausted — peer unreachable");
         }
     }
 
