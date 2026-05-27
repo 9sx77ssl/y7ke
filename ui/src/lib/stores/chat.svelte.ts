@@ -18,6 +18,7 @@ import {
   listMessages as rpcListMessages,
   sendMessage as rpcSendMessage,
 } from "../bridge";
+import { log } from "../log";
 import {
   MSG_FAILED,
   MSG_SENDING,
@@ -25,6 +26,7 @@ import {
   type MessageView,
 } from "../types";
 
+const logger = log("chat-store");
 const PAGE_LIMIT = 500;
 
 interface ChatState {
@@ -140,9 +142,20 @@ export function closeConversation(): void {
 
 export async function sendText(text: string): Promise<void> {
   const peer = state.peerY7Id;
-  if (peer === null) return;
+  logger.debug("sendText: enter", {
+    peer,
+    sending: state.sending,
+    len: text.length,
+  });
+  if (peer === null) {
+    logger.warn("sendText: aborted — no peer in chat state");
+    return;
+  }
   const trimmed = text.trim();
-  if (trimmed.length === 0) return;
+  if (trimmed.length === 0) {
+    logger.debug("sendText: aborted — empty text after trim");
+    return;
+  }
 
   state.sending = true;
   state.error = null;

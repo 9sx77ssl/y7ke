@@ -2,9 +2,9 @@
 
 ## V1 — LAN end-to-end ✓ (shipped 2026-05-27)
 
-Two people on the same LAN talk privately with zero infrastructure. 51
-tests green, audit closed, UX stabilization batch landed (`U1`–`U7` in
-`docs/TODO.md`).
+Two people on the same LAN talk privately with zero infrastructure. All
+test groups green, audit closed, UX stabilization batch landed (`U1`–`U7`
+in `docs/TODO.md`).
 
 What's in the V1 binary:
 
@@ -13,10 +13,18 @@ What's in the V1 binary:
 - mDNS-only discovery, libp2p TCP + Noise + Yamux
 - ChaCha20-Poly1305 / Ed25519 / X25519 / HKDF — every primitive from
   audited Rust crates
+- **Static-DH per-conversation key derivation** — session keys never
+  hit disk; derived on demand from the long-term identity scalar +
+  peer's Ed25519 pubkey (`HKDF(X25519(my_static, peer_static), conv_id)`).
+  Stealing the SQLite DB without the master DEK yields ciphertext only.
+- SQLite `PRAGMA secure_delete = ON` so wiped messages and sessions are
+  zero-filled in freed pages.
 - In-band control protocol (Accept / Reject / Delete) over the message
-  channel with auto-eject
+  channel with auto-eject; delete propagates bilaterally — both copies
+  vanish when the peer is next online.
 - Tauri 2 + Svelte 5 frontend, custom dark monochrome design system,
-  JetBrains Mono throughout
+  JetBrains Mono throughout. Frameless window with manual resize handles
+  and rounded corners. Toast queue capped at 2 with FIFO eviction.
 
 What V1 deliberately does **not** ship: internet routing, NAT traversal,
 forward secrecy, OS keychain, group chats, file transfer, read receipts.

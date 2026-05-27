@@ -4,7 +4,8 @@ Privacy-first, key-based, peer-to-peer desktop messenger.
 
 - **No accounts, no email, no phone numbers.** Your identity is a public key.
 - **No central server.** Peers discover each other directly and exchange messages over libp2p.
-- **End-to-end encrypted.** ChaCha20-Poly1305 sessions derived from an X25519 handshake; Ed25519 signatures over every envelope.
+- **End-to-end encrypted.** ChaCha20-Poly1305 per-conversation keys derived on demand from X25519(my_static_identity_scalar, peer_pubkey); Ed25519 signatures over every envelope. **No session key is ever stored** — stealing the SQLite file without the master DEK yields ciphertext only.
+- **Secure delete.** `PRAGMA secure_delete = ON` zero-fills freed pages so wiped messages and sessions don't linger on disk. Delete-contact propagates bilaterally — both copies vanish when the peer is next online.
 - **Local-first.** Messages persist in an encrypted SQLite database on disk.
 - **Offline-tolerant.** Undelivered messages queue locally and drain on reconnect; an explicit `/y7ke/sync/1.0.0` reconcile catches anything the queue lost.
 
@@ -39,9 +40,15 @@ DevTools (network + console + Svelte state).
 ### Build a release binary
 
 ```bash
-cargo tauri build              # full bundle (deb / AppImage / dmg / msi)
-cargo tauri build --no-bundle  # just the binary at target/release/y7ke
+cargo tauri build                                                   # full bundle (deb / AppImage / dmg / msi)
+cargo tauri build --no-bundle                                       # just the binary at target/release/y7ke
+cargo build --release -p y7ke-tauri --features custom-protocol      # binary with embedded frontend, no tauri-cli required
 ```
+
+The `custom-protocol` feature is what makes the binary serve the bundled
+frontend over Tauri's asset protocol; without it, release binaries fall
+back to the dev server URL (`http://localhost:1420`) and refuse to
+connect.
 
 ### Two peers on the same box
 
@@ -95,7 +102,9 @@ and locally.
 
 - The Ed25519 signing key is stored in SQLite encrypted with a 32-byte master DEK at `<app_data>/y7ke/master.dek` (file mode `0600`).
 - Disk and wire formats hold the same ciphertext — `messages.payload_enc` is byte-identical to what goes over `/y7ke/msg/1.0.0`.
-- Session keys are derived per-conversation via HKDF over the X25519 shared secret; never reused across conversations.
+- **Per-conversation keys are never stored.** They're derived on every encrypt/decrypt via `HKDF(X25519(my_static_x25519, peer_static_x25519), conv_id, "y7ke-conv-v1")`, where both X25519 keys come from the long-term Ed25519 identity (SHA-512 + clamp on the seed; Edwards-to-Montgomery on the pubkey). The DH is symmetric, so both peers compute the same key.
+- The `sessions` table only records "handshake completed" — no key material. Stealing the SQLite file alone gives you 32-byte ciphertexts and nothing to decrypt them with.
+- `PRAGMA secure_delete = ON` overwrites freed pages with zeros, so a wiped message or session can't be carved out of the database file.
 - Every envelope is signed with the sender's long-term Ed25519 key so receivers detect tampering and impersonation.
 
 ## Documentation

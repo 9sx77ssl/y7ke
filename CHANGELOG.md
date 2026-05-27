@@ -7,6 +7,18 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.13] — 2026-05-27
+
+- test: integration test for send-while-pending-out flow
+
+## [0.1.12] — 2026-05-27
+
+- fix(ui): apply buffered status update when swapping placeholder→realId
+
+## [0.1.11] — 2026-05-27
+
+- fix(ui): cap visible toasts at 2 with FIFO eviction
+
 ## [0.1.10] — 2026-05-27
 
 - fix(ui): chat race + y7 ID selectability
