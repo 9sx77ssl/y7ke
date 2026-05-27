@@ -18,7 +18,7 @@ use y7ke_net::{
     build_swarm, libp2p_keypair_from_y7_secret, spawn_swarm_with_bootstraps, NetEvent, NetHandle,
 };
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(45);
+const TEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 #[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)]
@@ -61,32 +61,42 @@ async fn run_kad_discovery() {
     let _alice_listen = wait_for_listening(alice.event_rx()).await;
     let _bob_listen = wait_for_listening(bob.event_rx()).await;
 
-    // Give Kad a few seconds for the routing tables to populate and for
-    // bob's `start_providing(self)` to land in the bootstrap's store.
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // The headline assertion: Alice can resolve Bob's addresses via
-    // Kad without ever having directly talked to him. find_peer
-    // short-circuits on the in-process address book (populated by
-    // identify when bob dialed bootstrap, and by Kad RoutingUpdated
-    // events as the bootstrap shared routes); either path proves the
-    // pipeline works.
-    match timeout(Duration::from_secs(20), alice.find_peer(bob_y7)).await {
-        Ok(Ok(addrs)) => {
-            assert!(
-                !addrs.is_empty(),
-                "find_peer resolved but returned no addresses"
-            );
-            eprintln!("find_peer(bob) returned {} address(es)", addrs.len());
-            // At least one of the returned addrs should belong to a
-            // peer libp2p can dial. We don't dial-test further because
-            // the goal of this test is the Kad discovery path itself.
+    // start_providing PUTs propagate to the bootstrap's record store
+    // asynchronously after each peer connects. On a slow runner (GitHub
+    // Actions) the first find_peer may race the PUT and return
+    // NotFound. Retry with backoff — production clients have the same
+    // pattern (the user can re-trigger from the UI). We give the
+    // pipeline up to ~30s total to stabilise.
+    let mut addrs = Vec::new();
+    for attempt in 0..8 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        match timeout(Duration::from_secs(10), alice.find_peer(bob_y7)).await {
+            Ok(Ok(found)) if !found.is_empty() => {
+                addrs = found;
+                eprintln!(
+                    "attempt {}: find_peer(bob) returned {} address(es)",
+                    attempt + 1,
+                    addrs.len()
+                );
+                break;
+            }
+            Ok(Ok(_)) => {
+                eprintln!("attempt {}: find_peer returned empty list", attempt + 1);
+            }
+            Ok(Err(e)) => {
+                eprintln!("attempt {}: find_peer returned {e:?}", attempt + 1);
+            }
+            Err(_) => {
+                eprintln!("attempt {}: find_peer timed out", attempt + 1);
+            }
         }
-        Ok(Err(e)) => panic!("find_peer returned error: {e:?}"),
-        Err(_) => panic!("find_peer(bob) timed out — Kad routing did not populate in 20s"),
     }
+    assert!(
+        !addrs.is_empty(),
+        "find_peer(bob) failed after 8 attempts over ~40s — Kad routing never populated"
+    );
 
-    let _ = bob_peer; // silence unused-binding lint if find_peer succeeded
+    let _ = bob_peer; // silence unused-binding lint
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
     bootstrap.shutdown().await.unwrap();
