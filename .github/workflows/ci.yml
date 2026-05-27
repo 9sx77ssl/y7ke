@@ -112,4 +112,4 @@ jobs:
         working-directory: ui
 
       - name: Build production binary
-        run: cargo build --release -p y7ke-tauri
+        run: cargo build --release -p y7ke-tauri --features custom-protocol
