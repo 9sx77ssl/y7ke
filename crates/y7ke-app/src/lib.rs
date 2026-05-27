@@ -9,6 +9,7 @@ pub mod event_loop;
 pub mod handshake;
 pub mod identity;
 pub mod messaging;
+pub mod rate_limit;
 pub mod views;
 
 pub use app::{AppConfig, AppHandle, EVENT_CHANNEL_CAPACITY};

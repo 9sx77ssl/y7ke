@@ -128,6 +128,13 @@ async fn handle_handshake(
         libp2p::request_response::ResponseChannel<y7ke_net::protocol::HandshakeResp>,
     >,
 ) -> Result<()> {
+    if !inner.rate_limiter.allow_handshake(libp2p_peer).await {
+        tracing::warn!(%libp2p_peer, "handshake rate-limited; refusing");
+        let reject = handshake::reject_response(&inner.me, &inner.my_pubkey, &request);
+        inner.net.respond_handshake_take(channel, reject).await?;
+        return Ok(());
+    }
+
     // M4: bind libp2p PeerId to the claimed initiator Ed25519 pubkey. The
     // Noise handshake already proved ownership of the libp2p key, and the
     // application signature inside the request proves ownership of
@@ -225,6 +232,15 @@ async fn handle_msg(
     envelope: MessageEnvelope,
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<MsgResp>>,
 ) -> Result<()> {
+    if !inner.rate_limiter.allow_msg(libp2p_peer).await {
+        tracing::warn!(%libp2p_peer, "msg rate-limited; refusing");
+        inner
+            .net
+            .respond_msg_take(channel, MsgResp { ack: false })
+            .await?;
+        return Ok(());
+    }
+
     // M2: cap ciphertext size. ChaCha20-Poly1305 adds a 16-byte tag, so allow
     // MAX_MESSAGE_BYTES + 16 + some slack.
     if envelope.ciphertext.len() > crate::app::MAX_MESSAGE_BYTES + 256 {
@@ -360,6 +376,13 @@ async fn handle_sync(
     request: SyncReq,
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<SyncResp>>,
 ) -> Result<()> {
+    if !inner.rate_limiter.allow_sync(peer).await {
+        tracing::warn!(%peer, "sync rate-limited; refusing");
+        let resp = empty_sync_resp_for(&request);
+        inner.net.respond_sync_take(channel, resp).await?;
+        return Ok(());
+    }
+
     // H2: identify the requester so we can scope conversation-pulls to a
     // single (self, requester) pair. Anyone else who has guessed at a
     // ConversationId must not get messages back.

@@ -10,6 +10,7 @@ use y7ke_core::{AppEvent, ConnectionKind, Y7Id};
 use y7ke_net::{build_swarm, libp2p_keypair_from_y7_secret, spawn_swarm, NetHandle};
 use y7ke_storage::{Db, DbConfig};
 
+use crate::rate_limit::RateLimiter;
 use crate::{event_loop, identity};
 
 mod contacts;
@@ -47,6 +48,7 @@ pub(crate) struct AppInner {
     /// Presence cache populated by event_loop. Read by list_contacts to
     /// survive the boot race where PresenceChanged fires before UI listener.
     pub presence: tokio::sync::RwLock<std::collections::HashMap<Y7Id, ConnectionKind>>,
+    pub rate_limiter: RateLimiter,
 }
 
 pub struct AppHandle {
@@ -75,6 +77,7 @@ impl AppHandle {
             my_pubkey,
             my_y7_id,
             presence: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            rate_limiter: RateLimiter::default_limits(),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
