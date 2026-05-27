@@ -21,6 +21,10 @@ const MDNS_BUDGET: Duration = Duration::from_secs(20);
 
 const PLAINTEXT: &str = "PRIVACY_CANARY_alpha_bravo_charlie_42";
 
+#[cfg_attr(
+    any(target_os = "macos", target_os = "windows"),
+    ignore = "mDNS unreliable on GitHub Actions runners"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn message_plaintext_never_lands_on_disk() {
     let _ = tracing_subscriber::fmt()

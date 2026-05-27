@@ -16,6 +16,10 @@ use y7ke_core::{AppEvent, ContactStatus, ConversationId, MessageStatus, RequestR
 const OVERALL_TIMEOUT: Duration = Duration::from_secs(45);
 const MDNS_BUDGET: Duration = Duration::from_secs(20);
 
+#[cfg_attr(
+    any(target_os = "macos", target_os = "windows"),
+    ignore = "mDNS unreliable on GitHub Actions runners"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alice_and_bob_exchange_messages() {
     // Best-effort tracing for postmortem debugging on CI.

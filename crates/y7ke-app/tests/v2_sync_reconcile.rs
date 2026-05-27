@@ -12,6 +12,10 @@ use y7ke_core::AppEvent;
 const OVERALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MDNS_BUDGET: Duration = Duration::from_secs(40);
 
+#[cfg_attr(
+    any(target_os = "macos", target_os = "windows"),
+    ignore = "mDNS unreliable on GitHub Actions runners"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sync_reconcile_delivers_offline_messages() {
     let _ = tracing_subscriber::fmt()
