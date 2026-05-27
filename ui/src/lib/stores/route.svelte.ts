@@ -9,7 +9,8 @@ export type MainPane =
   | { kind: "empty" }
   | { kind: "chat"; peerY7Id: string }
   | { kind: "add_contact" }
-  | { kind: "requests" };
+  | { kind: "requests" }
+  | { kind: "settings" };
 
 const route = $state<{ pane: MainPane }>({ pane: { kind: "empty" } });
 
@@ -49,4 +50,10 @@ export function openRequests(): void {
   logger.debug("→ requests");
   closeConversation();
   route.pane = { kind: "requests" };
+}
+
+export function openSettings(): void {
+  logger.debug("→ settings");
+  closeConversation();
+  route.pane = { kind: "settings" };
 }

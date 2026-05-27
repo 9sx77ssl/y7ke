@@ -14,6 +14,7 @@
     openChatWith,
     openEmpty,
     openRequests,
+    openSettings,
     router,
   } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
@@ -126,6 +127,12 @@
       badge={requests.incomingCount}
       active={router.pane.kind === "requests"}
       onclick={openRequests}
+    />
+    <NavItem
+      label="settings :3"
+      title="connection modes and bootstrap nodes"
+      active={router.pane.kind === "settings"}
+      onclick={openSettings}
     />
   </nav>
 

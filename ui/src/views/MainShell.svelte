@@ -13,6 +13,7 @@
   import Chat from "./Chat.svelte";
   import EmptyChat from "./EmptyChat.svelte";
   import Requests from "./Requests.svelte";
+  import Settings from "./Settings.svelte";
   import Sidebar from "./Sidebar.svelte";
 
   // Forward backend background errors into the toast queue. We clear the
@@ -40,6 +41,8 @@
       <AddContact />
     {:else if router.pane.kind === "requests"}
       <Requests />
+    {:else if router.pane.kind === "settings"}
+      <Settings />
     {/if}
   </section>
 </div>

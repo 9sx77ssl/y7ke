@@ -24,6 +24,7 @@ import {
   applyRequestResolved,
 } from "./requests.svelte";
 import { openEmpty, router } from "./route.svelte";
+import { refreshSettings } from "./settings.svelte";
 
 interface EventState {
   started: boolean;
@@ -110,6 +111,9 @@ function dispatch(ev: AppEvent): void {
       break;
     case "presence_changed":
       applyPresence(ev.y7_id, ev.connection);
+      break;
+    case "settings_changed":
+      void refreshSettings();
       break;
     case "background_error":
       state.lastBackgroundError = ev.message;
