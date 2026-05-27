@@ -112,14 +112,13 @@
 <aside class="sidebar">
   <nav class="actions" aria-label="primary">
     <NavItem
-      label="add contact"
-      glyph="+"
+      label="add contact ^.^"
       title="add a new contact"
       active={router.pane.kind === "add_contact"}
       onclick={openAddContact}
     />
     <NavItem
-      label="requests"
+      label="requests >.<"
       title="view pending contact requests"
       badge={requests.incomingCount}
       active={router.pane.kind === "requests"}

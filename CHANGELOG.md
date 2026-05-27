@@ -7,6 +7,14 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.15] — 2026-05-27
+
+- fix(ui): no-op self-reopen + chat-store diagnostic logging
+
+## [0.1.14] — 2026-05-27
+
+- fix(ci): correct artifact paths; docs: ROADMAP/README crypto-model refresh
+
 ## [0.1.13] — 2026-05-27
 
 - test: integration test for send-while-pending-out flow

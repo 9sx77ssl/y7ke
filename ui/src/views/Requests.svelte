@@ -14,7 +14,6 @@
   import { formatTimestamp, truncateY7Id } from "../lib/format";
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
-  import IconButton from "../lib/components/IconButton.svelte";
   import { toast } from "../lib/components/toast.svelte";
   import type { RequestView } from "../lib/types";
 
@@ -74,33 +73,6 @@
   <div class="content">
     <header class="head">
       <h1>requests</h1>
-      <IconButton
-        size={26}
-        ariaLabel="refresh requests"
-        title="refresh"
-        disabled={requests.loading}
-        onclick={() => {
-          void refreshRequests();
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
-          <path
-            d="M2 6a4 4 0 0 1 6.9-2.8M10 6a4 4 0 0 1-6.9 2.8"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-          />
-          <path
-            d="M9 1v3H6M3 11V8h3"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </IconButton>
     </header>
 
     {#if requests.error}

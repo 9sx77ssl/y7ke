@@ -263,4 +263,11 @@
     border-top: 1px solid var(--y7-border-subtle);
     background: var(--y7-bg-sidebar);
   }
+  /* Match the send button's height to the textarea's first-line height so
+     they line up flush. Textarea's auto-grow puts it above --y7-sz-btn-md. */
+  .composer :global(.btn) {
+    height: auto;
+    align-self: stretch;
+    min-height: var(--y7-sz-input);
+  }
 </style>
