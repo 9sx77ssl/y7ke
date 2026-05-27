@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.17] — 2026-05-27
+
+- fix(ui): expose chat store as direct $state — getter pattern lost reactivity
+
 ## [0.1.16] — 2026-05-27
 
 - ui: sidebar emoticons, send-button height match, drop dead requests refresh

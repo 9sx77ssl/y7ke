@@ -28,7 +28,7 @@
       {formatTimestamp(timestampMs)}
     </span>
     {#if isMine}
-      <span class="status" class:failed title={label}>
+      <span class="status" class:failed={status === 4} title={label}>
         {#if status === 0}
           <!-- clock: sending -->
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
