@@ -2546,6 +2546,7 @@ dependencies = [
  "libp2p-noise",
  "libp2p-ping",
  "libp2p-quic",
+ "libp2p-relay",
  "libp2p-request-response",
  "libp2p-swarm",
  "libp2p-tcp",
@@ -2717,6 +2718,7 @@ dependencies = [
  "libp2p-identity",
  "libp2p-kad",
  "libp2p-ping",
+ "libp2p-relay",
  "libp2p-swarm",
  "pin-project",
  "prometheus-client",
@@ -2782,6 +2784,30 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "libp2p-relay"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9b0392ed623243ad298326b9f806d51191829ac7585cc825c54c6c67b04d9"
+dependencies = [
+ "asynchronous-codec",
+ "bytes",
+ "either",
+ "futures",
+ "futures-bounded",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "quick-protobuf",
+ "quick-protobuf-codec",
+ "rand 0.8.6",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -7337,7 +7363,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-app"
-version = "0.1.24"
+version = "0.1.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7360,7 +7386,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-core"
-version = "0.1.24"
+version = "0.1.28"
 dependencies = [
  "blake3",
  "bs58",
@@ -7384,7 +7410,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-net"
-version = "0.1.24"
+version = "0.1.28"
 dependencies = [
  "async-trait",
  "bincode",
@@ -7402,7 +7428,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-storage"
-version = "0.1.24"
+version = "0.1.28"
 dependencies = [
  "async-trait",
  "directories",
@@ -7420,7 +7446,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-tauri"
-version = "0.1.24"
+version = "0.1.28"
 dependencies = [
  "serde",
  "serde_json",

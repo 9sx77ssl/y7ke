@@ -10,7 +10,7 @@ use libp2p::{
     identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
-    mdns, ping,
+    mdns, ping, relay,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
 };
@@ -46,6 +46,10 @@ pub struct Y7Behaviour {
     /// participating peers; each client `start_providing`s its own key so
     /// other clients can look it up via `get_providers`.
     pub kad: kad::Behaviour<MemoryStore>,
+    /// Circuit Relay v2 client — V2-A4. Lets us reserve a slot at each
+    /// configured bootstrap and accept inbound dials via `p2p-circuit`
+    /// when both peers are NAT'd.
+    pub relay_client: relay::client::Behaviour,
 }
 
 impl Y7Behaviour {
@@ -54,7 +58,10 @@ impl Y7Behaviour {
     /// `local_keypair` is taken by reference because identify's `Config`
     /// only needs the public key (and the derive macro takes ownership of
     /// the values it builds).
-    pub fn new(local_keypair: &Keypair) -> Result<Self, std::io::Error> {
+    pub fn new(
+        local_keypair: &Keypair,
+        relay_client: relay::client::Behaviour,
+    ) -> Result<Self, std::io::Error> {
         let local_peer_id = local_keypair.public().to_peer_id();
 
         let identify = identify::Behaviour::new(
@@ -116,6 +123,7 @@ impl Y7Behaviour {
             msg,
             sync,
             kad,
+            relay_client,
         })
     }
 }

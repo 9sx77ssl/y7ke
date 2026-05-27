@@ -12,13 +12,13 @@
 //! in a dedicated `tokio::task`, and returns a [`NetHandle`] over which
 //! the rest of the app issues commands and receives events.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use futures::StreamExt;
 use libp2p::{
     core::ConnectedPoint,
-    identify, identity, kad, mdns, noise,
+    identify, identity, kad, mdns, noise, relay,
     request_response::{self, OutboundRequestId},
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -81,8 +81,10 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
         .map_err(|e| AppError::network(format!("tcp/noise/yamux setup: {e}")))?
         .with_dns()
         .map_err(|e| AppError::network(format!("dns transport setup: {e}")))?
-        .with_behaviour(|kp| {
-            Y7Behaviour::new(kp)
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .map_err(|e| AppError::network(format!("relay-client setup: {e}")))?
+        .with_behaviour(|kp, relay_client| {
+            Y7Behaviour::new(kp, relay_client)
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
         })
         .map_err(|e| AppError::network(format!("behaviour setup: {e}")))?
@@ -129,10 +131,12 @@ pub fn spawn_swarm_with_bootstraps(
     // Seed the Kad routing table from configured bootstraps before
     // entering the loop. We don't dial yet — Kad's `bootstrap()` call
     // (issued once a peer is in the table) does that for us.
+    let mut bootstrap_peers: HashMap<PeerId, Multiaddr> = HashMap::new();
     for addr in &bootstraps {
         match peer_id_from_multiaddr(addr) {
             Some(peer) => {
                 swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
+                bootstrap_peers.insert(peer, addr.clone());
                 if let Err(e) = swarm.dial(addr.clone()) {
                     warn!(%addr, "bootstrap dial failed: {e}");
                 } else {
@@ -153,7 +157,7 @@ pub fn spawn_swarm_with_bootstraps(
         }
     }
 
-    tokio::spawn(run_swarm(swarm, cmd_rx, event_tx_for_task));
+    tokio::spawn(run_swarm(swarm, cmd_rx, event_tx_for_task, bootstrap_peers));
 
     NetHandle {
         cmd_tx,
@@ -168,8 +172,12 @@ async fn run_swarm(
     mut swarm: Swarm<Y7Behaviour>,
     mut cmd_rx: mpsc::Receiver<NetCommand>,
     event_tx: broadcast::Sender<NetEvent>,
+    bootstrap_peers: HashMap<PeerId, Multiaddr>,
 ) {
-    let mut state = TaskState::default();
+    let mut state = TaskState {
+        bootstrap_peers,
+        ..TaskState::default()
+    };
 
     loop {
         tokio::select! {
@@ -226,6 +234,16 @@ struct TaskState {
     /// until the routing table has at least one peer — calling it
     /// against an empty table fails with `NoKnownPeers`.
     provided_self: bool,
+
+    /// Bootstrap peers we configured at startup → their full multiaddr.
+    /// Used by `ConnectionEstablished` to know which connections deserve
+    /// a `listen_on(<addr>/p2p-circuit)` reservation request.
+    bootstrap_peers: HashMap<PeerId, Multiaddr>,
+
+    /// Bootstrap peers we have already issued a reservation `listen_on`
+    /// for in this task's lifetime — guards against re-issuing every
+    /// time the connection drops and reconnects.
+    relay_reserved: HashSet<PeerId>,
 }
 
 impl TaskState {
@@ -428,6 +446,22 @@ async fn handle_swarm_event(
                     kind,
                 },
             );
+
+            // V2-A4: bootstrap connections double as relay servers. Ask
+            // the relay client to listen on `/p2p-circuit` via this
+            // bootstrap so other clients can dial us through it.
+            if let Some(bootstrap_addr) = state.bootstrap_peers.get(&peer_id).cloned() {
+                if state.relay_reserved.insert(peer_id) {
+                    let circuit_addr = bootstrap_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
+                    match swarm.listen_on(circuit_addr.clone()) {
+                        Ok(_) => info!(%peer_id, %circuit_addr, "relay: requesting reservation"),
+                        Err(e) => {
+                            state.relay_reserved.remove(&peer_id);
+                            warn!(%peer_id, error = %e, "relay: listen_on circuit failed");
+                        }
+                    }
+                }
+            }
         }
 
         SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -486,9 +520,31 @@ async fn handle_swarm_event(
             handle_kad(swarm, state, event_tx, event);
         }
 
+        SwarmEvent::Behaviour(Y7BehaviourEvent::RelayClient(event)) => {
+            handle_relay_client(event);
+        }
+
         _ => {
             // Other variants (Dialing, IncomingConnection, ExternalAddr*, ...) are
             // not load-bearing in V1.
+        }
+    }
+}
+
+fn handle_relay_client(event: relay::client::Event) {
+    match event {
+        relay::client::Event::ReservationReqAccepted {
+            relay_peer_id,
+            renewal,
+            ..
+        } => {
+            info!(%relay_peer_id, renewal, "relay: reservation accepted");
+        }
+        relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
+            info!(%relay_peer_id, "relay: outbound circuit established");
+        }
+        relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
+            info!(%src_peer_id, "relay: inbound circuit established");
         }
     }
 }
@@ -792,8 +848,14 @@ fn emit(event_tx: &broadcast::Sender<NetEvent>, event: NetEvent) {
 /// which we mark `Internet`. The DCUtR-upgraded `Direct` and the
 /// relay-routed `Relayed` variants land later.
 fn connection_kind_for(endpoint: &ConnectedPoint) -> ConnectionKind {
-    let addr = endpoint.get_remote_address();
-    if multiaddr_is_lan(addr) {
+    // For an inbound relayed connection the remote address is just
+    // `/p2p/<src>` (no `p2p-circuit` component) — the circuit marker
+    // lives in `local_addr` instead. `ConnectedPoint::is_relayed`
+    // handles both endpoint roles correctly.
+    if endpoint.is_relayed() {
+        return ConnectionKind::Relayed;
+    }
+    if multiaddr_is_lan(endpoint.get_remote_address()) {
         ConnectionKind::Lan
     } else {
         ConnectionKind::Internet
