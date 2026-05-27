@@ -1,44 +1,44 @@
 # Y7KE TODO
 
-Live task list. Drop items that are done, add things as they surface.
+## V1 — LAN end-to-end ✅ shipping
 
-## M0 — Scaffold (in progress)
+All seven user-visible capabilities pass automated tests:
 
-- [x] Initialize local git repo inside `/home/rsz/Desktop/Y7KE/` (isolated from parent repo)
-- [x] Root `Cargo.toml` workspace with 4 members + shared `workspace.dependencies`
-- [x] `rust-toolchain.toml`, `.gitignore`, `README.md`
-- [x] Empty `y7ke-core`, `y7ke-storage`, `y7ke-net`, `y7ke-app` crate skeletons (compile-green)
-- [x] `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/ROADMAP.md`, `docs/TODO.md`
-- [ ] Vite + Svelte + TypeScript scaffold under `ui/`
-- [ ] `src-tauri/` shell wiring with `frontendDist = ../ui/dist` and Tokio runtime
-- [ ] `cargo tauri dev` opens an empty Y7KE window on Linux
-- [ ] CI workflow (Linux primary, macOS/Windows continue-on-error)
+- [x] **C1 — Generate identity.** Ed25519 keypair, persisted encrypted under master DEK; `Y7Id` URI `y7:<base58>`.
+- [x] **C2 — Add contact by key.** `send_contact_request` parses URI, dials peer over mDNS, runs `/y7ke/handshake/1.0.0`.
+- [x] **C3 — Accept / reject request.** Local state transitions + `RequestResolved` / `ContactAdded` events.
+- [x] **C4 — Open chat.** `list_messages(peer)` derives `ConversationId` and lists ordered messages.
+- [x] **C5 — Encrypted live messaging.** ChaCha20-Poly1305(session_key) over `/y7ke/msg/1.0.0`; Ed25519 sig verified.
+- [x] **C6 — SQLite persistence.** Per-message ciphertext on disk; sessions encrypted with DEK; restart preserves history.
+- [x] **C7 — Offline sync.** Failed live-sends enqueue in `sync_queue`; mDNS rediscovery drains it.
 
-## M1 — V1 capabilities
+Verified by `tests/v1_e2e.rs` (~3s) and `tests/v1_offline_sync.rs` (~6s) — 2 in-process clients on the same host.
 
-- [ ] `y7ke-core::crypto` — Ed25519 / X25519 / ChaCha20-Poly1305 / HKDF wrappers with `zeroize`
-- [ ] `y7ke-core::id` — `Y7Id`, `MessageId` (UUIDv7), `ConversationId` (blake3-derived)
-- [ ] `y7ke-core::error`, `event`, `status` — `AppError`, `AppEvent`, `MessageStatus`, `ConnectionKind`
-- [ ] `y7ke-storage::dek` — DEK file loader + `directories` integration
-- [ ] `y7ke-storage::field_crypto` — generic seal/open helpers
-- [ ] `y7ke-storage` migrations + DAOs for 8 tables
-- [ ] `y7ke-net::behaviour` — single `#[derive(NetworkBehaviour)]` aggregating mDNS + ping + identify + 3 request_response codecs
-- [ ] `y7ke-net::swarm` + `handle` — owning async task, `NetCommand`/`NetEvent` mpsc/broadcast facade
-- [ ] `y7ke-net::handshake` — X25519 session establishment
-- [ ] `y7ke-net::sync` — header/pull/ack state machine + retry driver
-- [ ] `y7ke-app::messaging` — send/receive orchestration
-- [ ] `y7ke-app::commands` — `get_my_id`, `add_contact_request`, `accept_request`, `reject_request`, `list_contacts`, `list_requests`, `send_message`, `list_messages`
-- [ ] Tauri command wrappers + event emit
-- [ ] Svelte views: IdentitySetup, Contacts, AddContact, Requests, Chat
-- [ ] V1 integration test exercising all 7 capabilities with 2 in-process clients
+## V1 release polish (next)
 
-## M2 — V1 release polish
+- [ ] Multi-client stress test (4–6 clients sustained message exchange)
+- [ ] Cold-start measurement script + tuning
+- [ ] Memory profiling (target: < 80MB RSS idle)
+- [ ] `cargo tauri build` → `.deb` / `.AppImage` artifacts
+- [ ] Real Y7KE icon (replaces 1×1 placeholder)
+- [ ] README install + usage instructions
+- [ ] Confirm `cargo tauri dev` opens window on Linux + driver-based UI smoke test
 
-- [ ] Stress test scaffold (6 clients, simulated network drops via custom Transport wrapper)
-- [ ] Cold-start measurement script
-- [ ] `cargo tauri build` produces `.deb` + `.AppImage` on Linux
-- [ ] README install instructions
+## V2 — Internet + hardening
 
-## Discovered
+- [ ] Kademlia DHT with self-hosted bootstrap relays
+- [ ] AutoNAT (detect public reachability)
+- [ ] Circuit relay v2 + DCUtR (NAT traversal)
+- [ ] QUIC transport
+- [ ] OS keychain integration (`keyring` crate, DEK promotion)
+- [ ] Argon2id passphrase vault (headless-host fallback)
+- [ ] Tauri-driver E2E tests across the UI flow
+- [ ] ts-rs codegen for command + event types (replace hand-written `types.ts`)
+- [ ] Read receipts (`Delivered` status)
 
-(empty — append as found)
+## V3 — Groups, files, anonymous routing
+
+- [ ] Group conversations (multi-party sessions)
+- [ ] File transfer (Bitswap-style chunked + resumable)
+- [ ] Optional onion / anonymous routing
+- [ ] Mobile (Tauri Mobile)

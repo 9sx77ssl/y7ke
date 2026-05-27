@@ -51,9 +51,10 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
         retry_until_ok(|| alice.send_contact_request(bob_id, Some("offline test".into()))),
     )
     .await??;
-    wait_for_event(&mut bob_events, |ev| {
-        matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri())
-    })
+    wait_for_event(
+        &mut bob_events,
+        |ev| matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri()),
+    )
     .await?;
     let pending = bob.list_pending_requests().await?;
     let alice_req = pending
@@ -69,9 +70,7 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(3)).await;
 
     // Alice sends 5 messages — these should fail live-send and enqueue.
-    let texts: Vec<String> = (0..5)
-        .map(|i| format!("offline msg {i}"))
-        .collect();
+    let texts: Vec<String> = (0..5).map(|i| format!("offline msg {i}")).collect();
     for t in &texts {
         // The send_message call always succeeds at the application level
         // (persists locally), even if the live push fails — the failure
