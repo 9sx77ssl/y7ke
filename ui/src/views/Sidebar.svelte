@@ -43,11 +43,6 @@
 </script>
 
 <aside class="sidebar">
-  <header class="brand-row">
-    <span class="brand-dot" aria-hidden="true"></span>
-    <span class="brand">y7ke</span>
-  </header>
-
   <nav class="actions" aria-label="primary">
     <NavItem
       label="add contact"
@@ -145,32 +140,11 @@
     min-height: 0;
   }
 
-  .brand-row {
-    display: flex;
-    align-items: center;
-    gap: var(--y7-sp-2);
-    padding: var(--y7-sp-4) var(--y7-sp-4) var(--y7-sp-3);
-    border-bottom: 1px solid var(--y7-border-subtle);
-  }
-  .brand-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--y7-green);
-  }
-  .brand {
-    font-size: var(--y7-fs-md);
-    font-weight: var(--y7-fw-bold);
-    color: var(--y7-text-primary);
-    text-transform: lowercase;
-    letter-spacing: 0.02em;
-  }
-
   .actions {
     display: flex;
     flex-direction: column;
     gap: var(--y7-sp-1);
-    padding: var(--y7-sp-3) var(--y7-sp-2);
+    padding: var(--y7-sp-4) var(--y7-sp-2) var(--y7-sp-3);
   }
 
   .section-head {

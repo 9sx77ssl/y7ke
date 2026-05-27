@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { HTMLInputAttributes } from "svelte/elements";
+
   interface Props {
     value: string;
     type?: "text" | "password";
@@ -7,7 +9,7 @@
     invalid?: boolean;
     ariaLabel?: string;
     spellcheck?: boolean;
-    autocomplete?: string;
+    autocomplete?: HTMLInputAttributes["autocomplete"];
     oninput?: (e: Event) => void;
     onkeydown?: (e: KeyboardEvent) => void;
   }

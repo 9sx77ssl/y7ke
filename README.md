@@ -28,29 +28,42 @@ Internet routing (NAT traversal, DHT, relay) lands in V2 — see `docs/ROADMAP.m
 
 - Rust stable (≥ 1.80) — `rustup install stable`
 - Node.js 22 and pnpm ≥ 10 — `npm install -g pnpm`
+- Tauri CLI — `cargo install tauri-cli --version "^2" --locked` (one-time)
 - **Linux only:** `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, `librsvg2-dev`
 - macOS / Windows: nothing extra; system WebView is used
 
-### Run in development
+### One-time setup
 
 ```bash
-pnpm --filter ./ui install
-cd src-tauri && cargo tauri dev
+pnpm --dir ui install
 ```
 
-The first build pulls libp2p, sqlx, and Tauri — expect ~3 minutes for a cold compile. Incremental builds are seconds.
+### Run (one command — backend + frontend together)
+
+```bash
+cargo tauri dev
+```
+
+The `beforeDevCommand` in `src-tauri/tauri.conf.json` spawns the Vite dev server automatically, then the Tauri shell connects to it. Cold compile pulls libp2p + sqlx + Tauri (~3 minutes the first time); incremental rebuilds are seconds.
+
+### Production build (one command)
+
+```bash
+cargo tauri build
+# Linux outputs land in src-tauri/target/release/bundle/{deb,appimage}/
+```
 
 ### Try two peers on one machine
 
 ```bash
-# Terminal 1 — copy the y7: ID it prints into the clipboard.
-cd src-tauri && cargo tauri dev
+# Terminal 1
+cargo tauri dev
 
-# Terminal 2 — uses a separate data dir so it gets a different identity.
+# Terminal 2 — separate data directory → separate identity
 XDG_DATA_HOME=/tmp/y7ke-bob cargo tauri dev
 ```
 
-Both windows discover each other over mDNS. Paste one ID into the other's "Add contact" panel, accept the request on the receiving side, and start chatting.
+Both windows discover each other over mDNS in ~3 seconds. Paste one Y7 URI into the other's "Add contact" panel, accept the request, and start chatting. See `docs/DEMO.md` for the full two-peer walkthrough and `docs/V1_CHECKLIST.md` for acceptance criteria.
 
 ### Tests
 
