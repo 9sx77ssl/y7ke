@@ -1,0 +1,104 @@
+/* Minimal CSS reset — collapses browser defaults without imposing opinion. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--y7-font-mono);
+  font-size: var(--y7-fs-md);
+  line-height: var(--y7-lh-normal);
+  color: var(--y7-text-primary);
+  background: var(--y7-bg-base);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Inputs + buttons inherit our font instead of system. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* The browser default focus ring isn't visible enough on dark bg. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--y7-border-focus);
+  outline-offset: 1px;
+}
+
+a {
+  color: var(--y7-blue);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Native scrollbars: thin + matte. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--y7-r-md);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Allow text selection in places that genuinely need it. */
+input,
+textarea,
+[data-selectable] {
+  user-select: text;
+}
+
+/* Disable native window drag/select on regions marked drag. */
+[data-tauri-drag-region] {
+  -webkit-user-select: none;
+  user-select: none;
+}

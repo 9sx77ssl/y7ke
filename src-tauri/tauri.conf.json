@@ -19,16 +19,39 @@
         "minWidth": 720,
         "minHeight": 540,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws: http://localhost:1420"
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
-    "icon": []
+    "category": "SocialNetworking",
+    "shortDescription": "Privacy-first peer-to-peer messenger.",
+    "longDescription": "Y7KE — privacy-first, key-based, peer-to-peer desktop messenger. End-to-end encrypted via Ed25519/X25519/ChaCha20-Poly1305. Local-first SQLite. No accounts, no email, no phone numbers. LAN-only in V1.",
+    "copyright": "Copyright 2026 Y7KE Contributors",
+    "publisher": "Y7KE Contributors",
+    "homepage": "https://github.com/y7ke/y7ke",
+    "licenseFile": "../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }

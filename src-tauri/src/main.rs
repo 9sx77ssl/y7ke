@@ -65,6 +65,24 @@ fn main() {
             tracing::info!("y7ke shell ready");
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Intercept the close so the swarm task can exit cleanly
+                // before the runtime tears down. Without this the libp2p
+                // task is dropped mid-operation, which leaves the sqlite
+                // WAL in a recoverable-but-noisy state on next boot.
+                api.prevent_close();
+                let win = window.clone();
+                async_runtime::spawn(async move {
+                    if let Some(handle) = win.try_state::<Arc<AppHandle>>() {
+                        let _ = handle.shutdown().await;
+                    }
+                    // Brief drain window.
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    let _ = win.destroy();
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_my_id,
             commands::list_contacts,
@@ -72,6 +90,7 @@ fn main() {
             commands::send_contact_request,
             commands::accept_request,
             commands::reject_request,
+            commands::cancel_request,
             commands::list_messages,
             commands::send_message,
         ])

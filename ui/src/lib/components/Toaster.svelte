@@ -1,0 +1,60 @@
+<script lang="ts">
+  import { toast } from "./toast.svelte";
+</script>
+
+<div class="toaster" aria-live="polite" aria-atomic="true">
+  {#each toast.queue as t (t.id)}
+    <div class="toast tone-{t.tone}">
+      <span class="msg">{t.message}</span>
+    </div>
+  {/each}
+</div>
+
+<style>
+  .toaster {
+    position: fixed;
+    right: var(--y7-sp-5);
+    bottom: var(--y7-sp-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-2);
+    z-index: var(--y7-z-toast);
+    pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto;
+    min-width: 140px;
+    max-width: 360px;
+    padding: var(--y7-sp-2) var(--y7-sp-4);
+    background: var(--y7-bg-elevated);
+    border: 1px solid var(--y7-border-default);
+    border-radius: var(--y7-r-md);
+    color: var(--y7-text-primary);
+    font-size: var(--y7-fs-sm);
+    line-height: var(--y7-lh-normal);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    animation: slide-in var(--y7-dur-base) var(--y7-ease);
+  }
+  .tone-success {
+    border-color: var(--y7-green-dim);
+    color: var(--y7-green);
+  }
+  .tone-error {
+    border-color: var(--y7-red-dim);
+    color: var(--y7-red);
+  }
+  .msg {
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+  }
+  @keyframes slide-in {
+    from {
+      transform: translateY(8px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+</style>

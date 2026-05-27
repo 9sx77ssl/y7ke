@@ -52,6 +52,11 @@ pub async fn reject_request(app: State<'_, AppState>, request_id: i64) -> Result
     app.reject_request(request_id).await.map_err(err)
 }
 
+#[tauri::command]
+pub async fn cancel_request(app: State<'_, AppState>, request_id: i64) -> Result<(), String> {
+    app.cancel_request(request_id).await.map_err(err)
+}
+
 /// The UI sends the peer's y7 URI as the conversation argument (the UI does
 /// not know the 16-byte conversation digest). We derive it server-side.
 #[tauri::command]

@@ -31,6 +31,25 @@ pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// both send and receive paths to bound memory usage from adversarial peers.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
+/// Best-effort RSS reading via `/proc/self/status`. Returns `None` on
+/// non-Linux or when the file can't be parsed. Used only for boot telemetry.
+fn process_rss_kb() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string("/proc/self/status").ok()?;
+        for line in s.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                return rest.split_whitespace().next()?.parse().ok();
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 /// All the configuration AppHandle needs.
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -71,6 +90,7 @@ impl AppHandle {
     /// and launch the background event loop. Returns when the runtime is
     /// fully wired up.
     pub async fn boot(config: AppConfig) -> Result<Self> {
+        let started = std::time::Instant::now();
         let db = Db::open(config.db).await?;
         let local = identity::ensure(&db).await?;
         let my_pubkey = local.signing_key.verifying_key().to_bytes();
@@ -105,7 +125,12 @@ impl AppHandle {
             y7_id: my_y7_id.to_uri(),
         });
 
-        tracing::info!(y7_id = %my_y7_id, "y7ke-app booted");
+        tracing::info!(
+            y7_id = %my_y7_id,
+            boot_ms = started.elapsed().as_millis() as u64,
+            rss_kb = process_rss_kb(),
+            "y7ke-app booted",
+        );
 
         Ok(Self { inner, event_tx })
     }
@@ -239,6 +264,35 @@ impl AppHandle {
         let _ = self.event_tx.send(AppEvent::RequestResolved {
             y7_id: pending.peer_y7_id.to_uri(),
             resolution: RequestResolution::Rejected,
+        });
+        Ok(())
+    }
+
+    /// Cancel a pending OUTGOING request. The local request row resolves as
+    /// `Cancelled` and the contact moves to `Removed`. V1 is local-only —
+    /// there's no protocol message that notifies the peer that we changed
+    /// our mind; if they were going to accept they may still see a pending
+    /// inbound request on their side until they reject or ignore it.
+    pub async fn cancel_request(&self, id: i64) -> Result<()> {
+        let pending = self.find_request(id).await?;
+        if pending.direction != y7ke_storage::dao::requests::RequestDirection::Outgoing {
+            return Err(AppError::invalid_input(
+                "only outgoing requests can be cancelled",
+            ));
+        }
+        self.inner
+            .db
+            .requests()
+            .resolve(id, RequestResolution::Cancelled)
+            .await?;
+        self.inner
+            .db
+            .contacts()
+            .update_status(&pending.peer_y7_id, ContactStatus::Removed)
+            .await?;
+        let _ = self.event_tx.send(AppEvent::RequestResolved {
+            y7_id: pending.peer_y7_id.to_uri(),
+            resolution: RequestResolution::Cancelled,
         });
         Ok(())
     }

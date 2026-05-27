@@ -67,6 +67,17 @@ export function rejectRequest(requestId: number): Promise<void> {
   return call<void>("reject_request", { requestId });
 }
 
+/**
+ * Cancel a pending outgoing contact request.
+ *
+ * The backend `cancel_request` command may not exist yet during early
+ * development; callers should `.catch()` and surface the error inline rather
+ * than letting it crash the view.
+ */
+export function cancelRequest(requestId: number): Promise<void> {
+  return call<void>("cancel_request", { requestId });
+}
+
 // ── Messages ────────────────────────────────────────────────────────────────
 
 export function listMessages(

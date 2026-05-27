@@ -1,9 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default Y7KE capability — main window may invoke core commands.",
+  "description": "Default Y7KE capability — main window may invoke core commands and operate its own window chrome.",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-is-maximized"
   ]
 }

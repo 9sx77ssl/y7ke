@@ -4,6 +4,7 @@
 
 import {
   acceptRequest as rpcAccept,
+  cancelRequest as rpcCancel,
   listPendingRequests,
   rejectRequest as rpcReject,
   sendContactRequest as rpcSend,
@@ -79,6 +80,16 @@ export async function acceptRequestAction(requestId: number): Promise<void> {
 
 export async function rejectRequestAction(requestId: number): Promise<void> {
   await rpcReject(requestId);
+  await refreshRequests();
+}
+
+/**
+ * Cancel a pending OUTGOING contact request. Errors propagate; the calling
+ * view is responsible for catching + toasting (the backend command may not
+ * be wired yet during dev).
+ */
+export async function cancelRequestAction(requestId: number): Promise<void> {
+  await rpcCancel(requestId);
   await refreshRequests();
 }
 
