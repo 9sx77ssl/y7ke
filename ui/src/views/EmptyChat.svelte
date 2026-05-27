@@ -1,73 +1,47 @@
 <script lang="ts">
-  import { identity } from "../lib/stores/identity.svelte";
-  import { truncateY7Id } from "../lib/format";
+  // Placeholder shown when no conversation is selected. Keep simple —
+  // the user's own y7 lives in AddContact, not here.
 
-  async function copyMyId(): Promise<void> {
-    if (identity.y7Id === null) return;
-    try {
-      await navigator.clipboard.writeText(identity.y7Id);
-    } catch {
-      // Silent — the IdentitySetup view is responsible for the copy UX.
-    }
-  }
+  import Button from "../lib/components/Button.svelte";
+  import { openAddContact } from "../lib/stores/route.svelte";
 </script>
 
 <section class="empty">
   <div class="inner">
-    <p class="title">Pick a contact, or add one to start.</p>
-    {#if identity.y7Id !== null}
-      <p class="me">
-        Your ID:
-        <code title={identity.y7Id}>{truncateY7Id(identity.y7Id, 10, 8)}</code>
-        <button type="button" onclick={copyMyId}>Copy</button>
-      </p>
-    {/if}
+    <p class="title">pick a contact, or add one to start.</p>
+    <Button
+      variant="ghost"
+      size="sm"
+      onclick={openAddContact}
+      title="open the add-contact view"
+    >
+      add contact
+    </Button>
   </div>
 </section>
 
 <style>
   .empty {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     display: grid;
     place-items: center;
-    padding: 2rem;
-    color: color-mix(in oklab, currentColor 80%, transparent);
+    padding: var(--y7-sp-8);
+    background: var(--y7-bg-base);
   }
   .inner {
     text-align: center;
-    max-width: 28rem;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--y7-sp-4);
   }
   .title {
-    font-size: 1rem;
-    margin: 0 0 1rem;
-    opacity: 0.65;
-  }
-  .me {
     margin: 0;
-    font-size: 0.85rem;
-    opacity: 0.6;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.8rem;
-    padding: 0.15rem 0.4rem;
-    background: color-mix(in oklab, currentColor 6%, transparent);
-    border-radius: 4px;
-  }
-  button {
-    font: inherit;
-    font-size: 0.8rem;
-    padding: 0.25rem 0.6rem;
-    border-radius: 5px;
-    border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-  button:hover {
-    background: color-mix(in oklab, currentColor 8%, transparent);
+    font-size: var(--y7-fs-md);
+    color: var(--y7-text-secondary);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
 </style>

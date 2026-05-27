@@ -1,30 +1,39 @@
 <script lang="ts">
+  // Add-contact form. The user's own y7 URI lives at the bottom as a
+  // KeyDisplay block — this is the SINGLE canonical place where the local
+  // identity is presented for copy/share. Removing the duplicate that used
+  // to live in the sidebar was a deliberate brief point.
+
   import { sendContactRequestAction } from "../lib/stores/requests.svelte";
+  import { identity } from "../lib/stores/identity.svelte";
   import { isValidY7Uri } from "../lib/format";
   import { openEmpty } from "../lib/stores/route.svelte";
+  import Button from "../lib/components/Button.svelte";
+  import Card from "../lib/components/Card.svelte";
+  import Input from "../lib/components/Input.svelte";
+  import Textarea from "../lib/components/Textarea.svelte";
+  import KeyDisplay from "../lib/components/KeyDisplay.svelte";
+  import { toast } from "../lib/components/toast.svelte";
 
   let y7Input = $state("");
   let greeting = $state("");
   let submitting = $state(false);
-  let error = $state<string | null>(null);
-  let success = $state<string | null>(null);
 
   const trimmed = $derived(y7Input.trim());
   const valid = $derived(isValidY7Uri(trimmed));
+  const showInvalid = $derived(trimmed.length > 0 && !valid);
 
   async function submit(): Promise<void> {
     if (!valid || submitting) return;
     submitting = true;
-    error = null;
-    success = null;
     try {
       const g = greeting.trim();
       await sendContactRequestAction(trimmed, g.length === 0 ? null : g);
-      success = "Request sent.";
+      toast.success("request sent");
       y7Input = "";
       greeting = "";
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       submitting = false;
     }
@@ -36,157 +45,159 @@
 </script>
 
 <section class="page">
-  <header class="head">
-    <h1>Add contact</h1>
-    <p class="sub">Paste a Y7KE identity to send a contact request.</p>
-  </header>
+  <div class="content">
+    <header class="head">
+      <h1>add contact</h1>
+      <p class="sub">paste a y7 identity to send a contact request.</p>
+    </header>
 
-  <form
-    onsubmit={(ev) => {
-      ev.preventDefault();
-      void submit();
-    }}
-  >
-    <label class="field">
-      <span>Identity</span>
-      <textarea
-        bind:value={y7Input}
-        placeholder="y7:…"
-        rows="2"
-        spellcheck="false"
-        autocapitalize="off"
-        autocomplete="off"
-        required
-      ></textarea>
-      {#if y7Input.trim().length > 0 && !valid}
-        <span class="hint warn">
-          That doesn't look like a valid <code>y7:</code> identity.
-        </span>
-      {/if}
-    </label>
+    <Card title="new request">
+      <form
+        class="form"
+        onsubmit={(ev) => {
+          ev.preventDefault();
+          void submit();
+        }}
+      >
+        <label class="field">
+          <span class="label">identity</span>
+          <Input
+            bind:value={y7Input}
+            placeholder="y7:…"
+            ariaLabel="contact identity"
+            invalid={showInvalid}
+          />
+          {#if showInvalid}
+            <span class="hint warn">
+              that doesn't look like a valid y7: identity.
+            </span>
+          {/if}
+        </label>
 
-    <label class="field">
-      <span>Greeting <em>(optional)</em></span>
-      <textarea
-        bind:value={greeting}
-        placeholder="Say hi"
-        rows="3"
-        maxlength="500"
-      ></textarea>
-    </label>
+        <label class="field">
+          <span class="label">greeting <em>(optional)</em></span>
+          <Textarea
+            bind:value={greeting}
+            placeholder="say hi"
+            rows={3}
+            ariaLabel="greeting"
+          />
+        </label>
 
-    <div class="row">
-      <button type="submit" disabled={!valid || submitting}>
-        {submitting ? "Sending…" : "Send request"}
-      </button>
-      <button type="button" class="ghost" onclick={cancel} disabled={submitting}>
-        Cancel
-      </button>
-    </div>
+        <div class="row">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!valid || submitting}
+            title="send contact request"
+          >
+            {submitting ? "sending…" : "send request"}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={submitting}
+            onclick={cancel}
+            title="cancel and return to chat list"
+          >
+            cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
 
-    {#if error}
-      <p class="msg err">{error}</p>
+    {#if identity.y7Id !== null}
+      <div class="my-key">
+        <KeyDisplay
+          value={identity.y7Id}
+          label="your identity"
+          layout="block"
+        />
+        <p class="hint">
+          share this with the person you want to talk to. your private key
+          never leaves this device.
+        </p>
+      </div>
     {/if}
-    {#if success}
-      <p class="msg ok">{success}</p>
-    {/if}
-  </form>
+  </div>
 </section>
 
 <style>
   .page {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 2rem 2.5rem;
+    padding: var(--y7-sp-8) var(--y7-sp-6);
+    background: var(--y7-bg-base);
+  }
+  .content {
+    max-width: 560px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-6);
   }
   .head {
-    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-1);
   }
   h1 {
     margin: 0;
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: var(--y7-fs-2xl);
+    font-weight: var(--y7-fw-bold);
+    color: var(--y7-text-primary);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
   .sub {
-    margin: 0.25rem 0 0;
-    opacity: 0.6;
-    font-size: 0.9rem;
+    margin: 0;
+    font-size: var(--y7-fs-md);
+    color: var(--y7-text-secondary);
+    text-transform: lowercase;
   }
-  form {
-    max-width: 40rem;
+
+  .form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--y7-sp-4);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    font-size: 0.85rem;
+    gap: var(--y7-sp-2);
   }
-  .field > span {
-    opacity: 0.75;
+  .label {
+    font-size: var(--y7-fs-sm);
+    color: var(--y7-text-secondary);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
-  .field em {
+  .label em {
     font-style: normal;
-    opacity: 0.5;
-    margin-left: 0.25rem;
-  }
-  textarea {
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85rem;
-    padding: 0.6rem 0.75rem;
-    border-radius: 6px;
-    border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-    background: color-mix(in oklab, Canvas 100%, currentColor 2%);
-    color: inherit;
-    resize: vertical;
-    min-height: 2.5rem;
+    color: var(--y7-text-muted);
+    margin-left: var(--y7-sp-1);
   }
   .row {
     display: flex;
-    gap: 0.6rem;
-    margin-top: 0.25rem;
-  }
-  button {
-    font: inherit;
-    padding: 0.55rem 1rem;
-    border-radius: 6px;
-    border: 1px solid color-mix(in oklab, currentColor 22%, transparent);
-    background: color-mix(in oklab, currentColor 8%, transparent);
-    color: inherit;
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) {
-    background: color-mix(in oklab, currentColor 14%, transparent);
-  }
-  button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  button.ghost {
-    background: transparent;
-  }
-  .msg {
-    margin: 0;
-    font-size: 0.85rem;
-  }
-  .msg.err {
-    color: color-mix(in oklab, currentColor 70%, crimson);
-  }
-  .msg.ok {
-    color: color-mix(in oklab, currentColor 60%, seagreen);
+    gap: var(--y7-sp-2);
+    margin-top: var(--y7-sp-1);
   }
   .hint {
-    font-size: 0.8rem;
+    font-size: var(--y7-fs-sm);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
+    margin: 0;
+    line-height: var(--y7-lh-relaxed);
   }
   .hint.warn {
-    color: color-mix(in oklab, currentColor 70%, crimson);
+    color: var(--y7-red);
   }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85em;
+
+  .my-key {
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-2);
+    padding-top: var(--y7-sp-4);
+    border-top: 1px solid var(--y7-border-subtle);
   }
 </style>

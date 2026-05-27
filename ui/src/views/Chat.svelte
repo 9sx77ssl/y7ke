@@ -1,4 +1,9 @@
 <script lang="ts">
+  // Active conversation view. Top: peer header (nickname + click-to-copy y7).
+  // Middle: scrollable message list. Bottom: composer (Textarea + Send).
+  // Re-opens the conversation whenever the peerY7Id prop changes (sidebar
+  // navigation triggers this via {#key} in MainShell).
+
   import {
     chat,
     openConversation,
@@ -6,12 +11,14 @@
   } from "../lib/stores/chat.svelte";
   import { findContact } from "../lib/stores/contacts.svelte";
   import { getPresence, presenceLabel } from "../lib/stores/presence.svelte";
-  import {
-    formatTimestamp,
-    statusBadge,
-    truncateY7Id,
-  } from "../lib/format";
-  import type { MessageView } from "../lib/types";
+  import { truncateY7Id } from "../lib/format";
+  import Button from "../lib/components/Button.svelte";
+  import KeyDisplay from "../lib/components/KeyDisplay.svelte";
+  import MessageBubble from "../lib/components/MessageBubble.svelte";
+  import StatusDot from "../lib/components/StatusDot.svelte";
+  import Textarea from "../lib/components/Textarea.svelte";
+  import type { ConnectionKind } from "../lib/types";
+  import type { StatusTone } from "../lib/components/StatusDot.svelte";
 
   interface Props {
     peerY7Id: string;
@@ -23,7 +30,7 @@
   let scrollEl = $state<HTMLDivElement | undefined>(undefined);
   let lastSeenCount = 0;
 
-  // Re-open the conversation when the peer changes (sidebar click switches it).
+  // Re-open the conversation when the peer changes.
   $effect(() => {
     if (chat.peerY7Id !== peerY7Id) {
       void openConversation(peerY7Id);
@@ -36,8 +43,6 @@
     if (!scrollEl) return;
     if (count !== lastSeenCount) {
       lastSeenCount = count;
-      // Defer to let layout settle (Svelte 5 will have flushed the DOM by here
-      // but we still want the post-paint scrollHeight).
       queueMicrotask(() => {
         if (scrollEl) {
           scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -51,6 +56,7 @@
   const displayName = $derived(
     contact?.nickname ?? truncateY7Id(peerY7Id, 10, 8),
   );
+  const hasNickname = $derived(contact?.nickname != null);
 
   async function submit(): Promise<void> {
     const text = composer.trim();
@@ -66,70 +72,68 @@
     }
   }
 
-  function presenceTone(): string {
-    switch (presence) {
+  function presenceTone(p: ConnectionKind): StatusTone {
+    switch (p) {
       case "lan":
-        return "ok";
+        return "online";
       case "connecting":
-        return "warn";
+        return "connecting";
       case "offline":
-        return "muted";
+        return "offline";
     }
-  }
-
-  function bubbleClasses(msg: MessageView): string {
-    const classes = ["bubble"];
-    if (msg.is_mine) classes.push("mine");
-    else classes.push("theirs");
-    if (msg.status === 4) classes.push("failed");
-    return classes.join(" ");
   }
 </script>
 
 <section class="chat">
   <header class="head">
     <div class="who">
-      <span class="name">{displayName}</span>
-      <code class="y7" title={peerY7Id}>{truncateY7Id(peerY7Id)}</code>
+      <StatusDot
+        tone={presenceTone(presence)}
+        size={8}
+        title={presenceLabel(presence)}
+      />
+      <span class="name" title={contact?.nickname ?? peerY7Id}>
+        {displayName}
+      </span>
+      <span class="presence">{presenceLabel(presence).toLowerCase()}</span>
     </div>
-    <span class="presence" data-tone={presenceTone()}>
-      <span class="dot" aria-hidden="true"></span>
-      {presenceLabel(presence)}
-    </span>
+    {#if hasNickname}
+      <div class="head-key">
+        <KeyDisplay value={peerY7Id} layout="inline" truncate />
+      </div>
+    {/if}
   </header>
 
   <div class="scroll" bind:this={scrollEl}>
-    {#if chat.loading && chat.messages.length === 0}
-      <p class="info">Loading…</p>
-    {/if}
+    <div class="scroll-inner">
+      {#if chat.loading && chat.messages.length === 0}
+        <p class="info">loading…</p>
+      {/if}
 
-    {#if chat.error}
-      <p class="info err">{chat.error}</p>
-    {/if}
+      {#if chat.error}
+        <p class="info err">{chat.error}</p>
+      {/if}
 
-    {#if !chat.loading && chat.messages.length === 0 && !chat.error}
-      <p class="info">
-        No messages yet. Say something — it'll deliver as soon as
-        {displayName} is on the LAN.
-      </p>
-    {/if}
+      {#if !chat.loading && chat.messages.length === 0 && !chat.error}
+        <p class="info">
+          no messages yet. say something — it'll deliver as soon as
+          {displayName} is on the lan.
+        </p>
+      {/if}
 
-    <ol class="list">
-      {#each chat.messages as msg (msg.message_id)}
-        {@const badge = statusBadge(msg.status)}
-        <li class={bubbleClasses(msg)}>
-          <div class="text">{msg.text}</div>
-          <div class="meta">
-            <span class="ts">{formatTimestamp(msg.timestamp_ms)}</span>
-            {#if msg.is_mine}
-              <span class="status" data-tone={badge.tone} title={badge.label}>
-                {badge.glyph}
-              </span>
-            {/if}
-          </div>
-        </li>
-      {/each}
-    </ol>
+      <ol class="list">
+        {#each chat.messages as msg (msg.message_id)}
+          <li>
+            <MessageBubble
+              text={msg.text}
+              timestampMs={msg.timestamp_ms}
+              isMine={msg.is_mine}
+              status={msg.status}
+            />
+          </li>
+        {/each}
+      </ol>
+    </div>
   </div>
 
   <form
@@ -139,200 +143,119 @@
       void submit();
     }}
   >
-    <textarea
+    <Textarea
       bind:value={composer}
-      placeholder="Write a message…"
-      rows="2"
-      onkeydown={handleKeydown}
+      placeholder="write a message…"
+      rows={2}
       disabled={chat.sending}
-      aria-label="Message"
-    ></textarea>
-    <button type="submit" disabled={chat.sending || composer.trim().length === 0}>
-      {chat.sending ? "Sending…" : "Send"}
-    </button>
+      ariaLabel="message"
+      onkeydown={handleKeydown}
+    />
+    <Button
+      type="submit"
+      variant="primary"
+      disabled={chat.sending || composer.trim().length === 0}
+      title="send message (enter)"
+    >
+      {chat.sending ? "sending…" : "send"}
+    </Button>
   </form>
 </section>
 
 <style>
   .chat {
-    height: 100%;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    min-height: 0;
+    background: var(--y7-bg-base);
   }
+
   .head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.85rem 1.25rem;
-    border-bottom: 1px solid color-mix(in oklab, currentColor 12%, transparent);
-    background: color-mix(in oklab, Canvas 100%, currentColor 1.5%);
+    gap: var(--y7-sp-3);
+    padding: var(--y7-sp-3) var(--y7-sp-5);
+    border-bottom: 1px solid var(--y7-border-subtle);
+    background: var(--y7-bg-sidebar);
+    min-width: 0;
   }
   .who {
     display: flex;
-    align-items: baseline;
-    gap: 0.55rem;
+    align-items: center;
+    gap: var(--y7-sp-2);
     min-width: 0;
-    overflow: hidden;
+    flex: 1;
   }
   .name {
-    font-weight: 600;
-    font-size: 0.95rem;
-    letter-spacing: -0.01em;
+    font-weight: var(--y7-fw-semibold);
+    font-size: var(--y7-fs-lg);
+    color: var(--y7-text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .y7 {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.75rem;
-    padding: 0.1rem 0.4rem;
-    background: color-mix(in oklab, currentColor 6%, transparent);
-    border-radius: 4px;
-    opacity: 0.7;
-    white-space: nowrap;
+    min-width: 0;
   }
   .presence {
-    font-size: 0.78rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    opacity: 0.8;
+    font-size: var(--y7-fs-xs);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
     white-space: nowrap;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.5;
-  }
-  .presence[data-tone="ok"] {
-    color: color-mix(in oklab, currentColor 55%, seagreen);
-  }
-  .presence[data-tone="warn"] {
-    color: color-mix(in oklab, currentColor 55%, goldenrod);
-  }
-  .presence[data-tone="muted"] {
-    opacity: 0.55;
+  .head-key {
+    flex-shrink: 0;
+    max-width: 240px;
+    min-width: 0;
+    display: flex;
   }
 
   .scroll {
     overflow-y: auto;
-    padding: 1rem 1.25rem 1.25rem;
     min-height: 0;
+    padding: var(--y7-sp-4) var(--y7-sp-5);
+  }
+  .scroll-inner {
+    max-width: 760px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-3);
   }
   .info {
-    margin: 1rem 0;
+    margin: var(--y7-sp-4) 0;
     text-align: center;
-    font-size: 0.85rem;
-    opacity: 0.6;
+    font-size: var(--y7-fs-sm);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
   .info.err {
-    color: color-mix(in oklab, currentColor 70%, crimson);
-    opacity: 0.85;
+    color: var(--y7-red);
   }
+
   .list {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--y7-sp-2);
   }
-  .bubble {
-    max-width: min(36rem, 80%);
-    padding: 0.55rem 0.8rem;
-    border-radius: 14px;
-    background: color-mix(in oklab, currentColor 6%, transparent);
-    line-height: 1.4;
-    font-size: 0.9rem;
-    word-wrap: break-word;
-    animation: fade-in 130ms ease-out;
-  }
-  .bubble.mine {
-    align-self: flex-end;
-    background: color-mix(in oklab, AccentColor 24%, transparent);
-    border-bottom-right-radius: 4px;
-  }
-  .bubble.theirs {
-    align-self: flex-start;
-    border-bottom-left-radius: 4px;
-  }
-  .bubble.failed {
-    background: color-mix(in oklab, crimson 18%, transparent);
-  }
-  .text {
-    white-space: pre-wrap;
-  }
-  .meta {
+  .list li {
     display: flex;
-    justify-content: flex-end;
-    gap: 0.4rem;
-    margin-top: 0.25rem;
-    font-size: 0.7rem;
-    opacity: 0.6;
-  }
-  .status[data-tone="ok"] {
-    color: color-mix(in oklab, currentColor 50%, seagreen);
-    opacity: 0.9;
-  }
-  .status[data-tone="warn"] {
-    color: color-mix(in oklab, currentColor 60%, crimson);
-    opacity: 1;
+    flex-direction: column;
   }
 
   .composer {
     display: grid;
     grid-template-columns: 1fr auto;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem 1rem;
-    border-top: 1px solid color-mix(in oklab, currentColor 12%, transparent);
-    background: color-mix(in oklab, Canvas 100%, currentColor 1.5%);
-  }
-  textarea {
-    font: inherit;
-    font-size: 0.9rem;
-    padding: 0.55rem 0.75rem;
-    border-radius: 8px;
-    border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-    background: Canvas;
-    color: inherit;
-    resize: vertical;
-    min-height: 2.4rem;
-    max-height: 12rem;
-  }
-  textarea:disabled {
-    opacity: 0.6;
-  }
-  button {
-    font: inherit;
-    padding: 0 1.1rem;
-    border-radius: 8px;
-    border: 1px solid color-mix(in oklab, currentColor 22%, transparent);
-    background: color-mix(in oklab, AccentColor 26%, transparent);
-    color: inherit;
-    cursor: pointer;
-    font-size: 0.9rem;
-    align-self: end;
-    height: 2.4rem;
-  }
-  button:hover:not(:disabled) {
-    background: color-mix(in oklab, AccentColor 36%, transparent);
-  }
-  button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(2px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    align-items: end;
+    gap: var(--y7-sp-2);
+    padding: var(--y7-sp-3) var(--y7-sp-5);
+    border-top: 1px solid var(--y7-border-subtle);
+    background: var(--y7-bg-sidebar);
   }
 </style>

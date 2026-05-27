@@ -1,14 +1,24 @@
 <script lang="ts">
+  // Two-section requests view. Incoming rows expose Accept (primary) + Reject
+  // (ghost). Outgoing rows expose a Cancel button — that's the new V2 piece;
+  // the corresponding `cancel_request` backend command is being wired in
+  // parallel, so we tolerate "command not found" by toasting the error.
+
   import {
     acceptRequestAction,
+    cancelRequestAction,
     refreshRequests,
     rejectRequestAction,
     requests,
   } from "../lib/stores/requests.svelte";
   import { formatTimestamp, truncateY7Id } from "../lib/format";
+  import Button from "../lib/components/Button.svelte";
+  import Card from "../lib/components/Card.svelte";
+  import IconButton from "../lib/components/IconButton.svelte";
+  import { toast } from "../lib/components/toast.svelte";
+  import type { RequestView } from "../lib/types";
 
   let busyIds = $state<Record<number, boolean>>({});
-  let rowErrors = $state<Record<number, string>>({});
 
   $effect(() => {
     if (!requests.loadedOnce && !requests.loading) {
@@ -16,261 +26,274 @@
     }
   });
 
+  function setBusy(id: number, v: boolean): void {
+    if (v) busyIds[id] = true;
+    else delete busyIds[id];
+  }
+
   async function accept(id: number): Promise<void> {
-    busyIds[id] = true;
-    delete rowErrors[id];
+    setBusy(id, true);
     try {
       await acceptRequestAction(id);
+      toast.success("contact accepted");
     } catch (err) {
-      rowErrors[id] = err instanceof Error ? err.message : String(err);
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      delete busyIds[id];
+      setBusy(id, false);
     }
   }
 
   async function reject(id: number): Promise<void> {
-    busyIds[id] = true;
-    delete rowErrors[id];
+    setBusy(id, true);
     try {
       await rejectRequestAction(id);
+      toast.info("request rejected");
     } catch (err) {
-      rowErrors[id] = err instanceof Error ? err.message : String(err);
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      delete busyIds[id];
+      setBusy(id, false);
+    }
+  }
+
+  async function cancel(id: number): Promise<void> {
+    setBusy(id, true);
+    try {
+      await cancelRequestAction(id);
+      toast.success("request cancelled");
+    } catch (err) {
+      // If the backend `cancel_request` command isn't wired yet, the error
+      // surfaces here instead of crashing the view.
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(id, false);
     }
   }
 </script>
 
 <section class="page">
-  <header class="head">
-    <h1>Requests</h1>
-    <button
-      type="button"
-      class="refresh"
-      onclick={() => {
-        void refreshRequests();
-      }}
-      disabled={requests.loading}
-      aria-label="Refresh requests"
-    >
-      {requests.loading ? "…" : "Refresh"}
-    </button>
-  </header>
+  <div class="content">
+    <header class="head">
+      <h1>requests</h1>
+      <IconButton
+        size={26}
+        ariaLabel="refresh requests"
+        title="refresh"
+        disabled={requests.loading}
+        onclick={() => {
+          void refreshRequests();
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
+          <path
+            d="M2 6a4 4 0 0 1 6.9-2.8M10 6a4 4 0 0 1-6.9 2.8"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+          />
+          <path
+            d="M9 1v3H6M3 11V8h3"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </IconButton>
+    </header>
 
-  {#if requests.error}
-    <p class="msg err">{requests.error}</p>
-  {/if}
-
-  <section class="group">
-    <h2>Incoming <span class="count">{requests.incoming.length}</span></h2>
-    {#if requests.incoming.length === 0}
-      <p class="empty">No incoming requests.</p>
-    {:else}
-      <ul>
-        {#each requests.incoming as req (req.id)}
-          <li class="row">
-            <div class="meta">
-              <code class="y7" title={req.peer_y7_id}>
-                {truncateY7Id(req.peer_y7_id)}
-              </code>
-              <span class="ts">{formatTimestamp(req.created_at)}</span>
-            </div>
-            {#if req.initial_text}
-              <p class="greeting">{req.initial_text}</p>
-            {/if}
-            <div class="actions">
-              <button
-                type="button"
-                disabled={busyIds[req.id]}
-                onclick={() => {
-                  void accept(req.id);
-                }}
-              >
-                Accept
-              </button>
-              <button
-                type="button"
-                class="ghost"
-                disabled={busyIds[req.id]}
-                onclick={() => {
-                  void reject(req.id);
-                }}
-              >
-                Reject
-              </button>
-            </div>
-            {#if rowErrors[req.id]}
-              <p class="msg err small">{rowErrors[req.id]}</p>
-            {/if}
-          </li>
-        {/each}
-      </ul>
+    {#if requests.error}
+      <p class="msg err">{requests.error}</p>
     {/if}
-  </section>
 
-  <section class="group">
-    <h2>Outgoing <span class="count">{requests.outgoing.length}</span></h2>
-    {#if requests.outgoing.length === 0}
-      <p class="empty">No outgoing requests pending.</p>
-    {:else}
-      <ul>
-        {#each requests.outgoing as req (req.id)}
-          <li class="row">
-            <div class="meta">
-              <code class="y7" title={req.peer_y7_id}>
-                {truncateY7Id(req.peer_y7_id)}
-              </code>
-              <span class="ts">{formatTimestamp(req.created_at)}</span>
-            </div>
-            {#if req.initial_text}
-              <p class="greeting">{req.initial_text}</p>
-            {/if}
-            <p class="status-line">Pending…</p>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+    <Card title="incoming ({requests.incoming.length})">
+      {#if requests.incoming.length === 0}
+        <p class="empty">no incoming requests.</p>
+      {:else}
+        <ul class="rows">
+          {#each requests.incoming as req (req.id)}
+            {@render row(req, "incoming")}
+          {/each}
+        </ul>
+      {/if}
+    </Card>
+
+    <Card title="outgoing ({requests.outgoing.length})">
+      {#if requests.outgoing.length === 0}
+        <p class="empty">no outgoing requests pending.</p>
+      {:else}
+        <ul class="rows">
+          {#each requests.outgoing as req (req.id)}
+            {@render row(req, "outgoing")}
+          {/each}
+        </ul>
+      {/if}
+    </Card>
+  </div>
 </section>
+
+{#snippet row(req: RequestView, kind: "incoming" | "outgoing")}
+  <li class="row">
+    <div class="meta">
+      <code class="y7" title={req.peer_y7_id} data-selectable>
+        {truncateY7Id(req.peer_y7_id)}
+      </code>
+      <span class="ts">{formatTimestamp(req.created_at)}</span>
+    </div>
+    {#if req.initial_text}
+      <p class="greeting">{req.initial_text}</p>
+    {/if}
+    <div class="actions">
+      {#if kind === "incoming"}
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busyIds[req.id]}
+          title="accept this contact request"
+          onclick={() => {
+            void accept(req.id);
+          }}
+        >
+          accept
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busyIds[req.id]}
+          title="reject this contact request"
+          onclick={() => {
+            void reject(req.id);
+          }}
+        >
+          reject
+        </Button>
+      {:else}
+        <span class="status-line">pending…</span>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={busyIds[req.id]}
+          title="cancel this outgoing request"
+          onclick={() => {
+            void cancel(req.id);
+          }}
+        >
+          cancel
+        </Button>
+      {/if}
+    </div>
+  </li>
+{/snippet}
 
 <style>
   .page {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 2rem 2.5rem;
+    padding: var(--y7-sp-8) var(--y7-sp-6);
+    background: var(--y7-bg-base);
+  }
+  .content {
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-5);
   }
   .head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
-    margin-bottom: 1.5rem;
+    gap: var(--y7-sp-3);
   }
   h1 {
     margin: 0;
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: var(--y7-fs-2xl);
+    font-weight: var(--y7-fw-bold);
+    color: var(--y7-text-primary);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
-  .refresh {
-    font: inherit;
-    font-size: 0.8rem;
-    padding: 0.3rem 0.7rem;
-    border-radius: 5px;
-    border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-  .refresh:hover:not(:disabled) {
-    background: color-mix(in oklab, currentColor 8%, transparent);
-  }
-  .refresh:disabled {
-    opacity: 0.5;
-    cursor: progress;
-  }
-  .group {
-    margin-bottom: 2rem;
-  }
-  h2 {
-    margin: 0 0 0.75rem;
-    font-size: 0.95rem;
-    font-weight: 600;
-    opacity: 0.75;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .count {
-    font-size: 0.75rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    background: color-mix(in oklab, currentColor 8%, transparent);
-    opacity: 0.85;
-  }
-  ul {
+
+  .rows {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: var(--y7-sp-3);
   }
   .row {
-    padding: 0.85rem 1rem;
-    border-radius: 8px;
-    border: 1px solid color-mix(in oklab, currentColor 14%, transparent);
-    background: color-mix(in oklab, Canvas 100%, currentColor 2%);
+    display: flex;
+    flex-direction: column;
+    gap: var(--y7-sp-2);
+    padding: var(--y7-sp-3);
+    border: 1px solid var(--y7-border-subtle);
+    border-radius: var(--y7-r-md);
+    background: var(--y7-bg-base);
   }
   .meta {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
+    gap: var(--y7-sp-3);
   }
   .y7 {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.8rem;
-    padding: 0.15rem 0.4rem;
-    background: color-mix(in oklab, currentColor 6%, transparent);
-    border-radius: 4px;
+    font-family: var(--y7-font-mono);
+    font-size: var(--y7-fs-sm);
+    padding: var(--y7-sp-1) var(--y7-sp-2);
+    background: var(--y7-bg-elevated);
+    border: 1px solid var(--y7-border-subtle);
+    border-radius: var(--y7-r-sm);
+    color: var(--y7-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
   }
   .ts {
-    font-size: 0.75rem;
-    opacity: 0.55;
+    font-size: var(--y7-fs-xs);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
   }
   .greeting {
-    margin: 0 0 0.6rem;
-    font-size: 0.9rem;
-    opacity: 0.85;
-    line-height: 1.4;
+    margin: 0;
+    padding: var(--y7-sp-2) var(--y7-sp-3);
+    background: var(--y7-bg-elevated);
+    border-radius: var(--y7-r-sm);
+    font-size: var(--y7-fs-md);
+    color: var(--y7-text-primary);
+    line-height: var(--y7-lh-normal);
     white-space: pre-wrap;
     word-break: break-word;
   }
   .actions {
     display: flex;
-    gap: 0.5rem;
+    align-items: center;
+    gap: var(--y7-sp-2);
+    flex-wrap: wrap;
   }
-  button {
-    font: inherit;
-    padding: 0.4rem 0.85rem;
-    border-radius: 5px;
-    border: 1px solid color-mix(in oklab, currentColor 22%, transparent);
-    background: color-mix(in oklab, currentColor 10%, transparent);
-    color: inherit;
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  button:hover:not(:disabled) {
-    background: color-mix(in oklab, currentColor 16%, transparent);
-  }
-  button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  button.ghost {
-    background: transparent;
+  .status-line {
+    flex: 1;
+    font-size: var(--y7-fs-sm);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
   }
   .empty {
     margin: 0;
-    font-size: 0.85rem;
-    opacity: 0.55;
-    padding: 0.5rem 0;
-  }
-  .status-line {
-    margin: 0;
-    font-size: 0.8rem;
-    opacity: 0.6;
-    font-style: italic;
+    font-size: var(--y7-fs-md);
+    color: var(--y7-text-muted);
+    text-transform: lowercase;
   }
   .msg {
-    margin: 0.5rem 0 0;
-    font-size: 0.85rem;
+    margin: 0;
+    font-size: var(--y7-fs-sm);
   }
   .msg.err {
-    color: color-mix(in oklab, currentColor 70%, crimson);
-  }
-  .msg.small {
-    font-size: 0.8rem;
+    color: var(--y7-red);
   }
 </style>
