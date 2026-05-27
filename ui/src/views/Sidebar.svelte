@@ -4,6 +4,7 @@
 
   import {
     contacts,
+    deleteContactAction,
     refreshContacts,
   } from "../lib/stores/contacts.svelte";
   import { refreshRequests, requests } from "../lib/stores/requests.svelte";
@@ -11,15 +12,71 @@
   import {
     openAddContact,
     openChatWith,
+    openEmpty,
     openRequests,
     router,
   } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
+  import { toast } from "../lib/components/toast.svelte";
+  import { log } from "../lib/log";
   import type { ConnectionKind } from "../lib/types";
   import IconButton from "../lib/components/IconButton.svelte";
   import NavItem from "../lib/components/NavItem.svelte";
   import ContactRow from "../lib/components/ContactRow.svelte";
+  import ContextMenu, {
+    type ContextMenuItem,
+  } from "../lib/components/ContextMenu.svelte";
+  import Modal from "../lib/components/Modal.svelte";
   import type { StatusTone } from "../lib/components/StatusDot.svelte";
+
+  const logger = log("Sidebar");
+
+  // Context menu state
+  let ctxOpen = $state(false);
+  let ctxX = $state(0);
+  let ctxY = $state(0);
+  let ctxItems = $state<ContextMenuItem[]>([]);
+
+  // Delete-confirm modal
+  let deleteOpen = $state(false);
+  let deleteTarget = $state<string | null>(null);
+
+  function openContextMenu(e: MouseEvent, y7Id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    ctxX = e.clientX;
+    ctxY = e.clientY;
+    ctxItems = [
+      {
+        label: "delete chat",
+        danger: true,
+        onClick: () => {
+          deleteTarget = y7Id;
+          deleteOpen = true;
+        },
+      },
+    ];
+    ctxOpen = true;
+  }
+
+  async function confirmDelete() {
+    const target = deleteTarget;
+    if (target === null) return;
+    logger.info("deleting contact", target);
+    try {
+      await deleteContactAction(target);
+      toast.success("chat deleted");
+      if (router.pane.kind === "chat" && router.pane.peerY7Id === target) {
+        openEmpty();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("delete failed", msg);
+      toast.error(`delete failed: ${msg}`);
+    } finally {
+      deleteTarget = null;
+    }
+  }
 
   $effect(() => {
     if (!contacts.loadedOnce && !contacts.loading) void refreshContacts();
@@ -118,7 +175,10 @@
     {#each contacts.visible as c (c.y7_id)}
       {@const presence = getPresence(c.y7_id)}
       {@const pending = pendingLabel(c.status)}
-      <li>
+      <li
+        oncontextmenu={(e) => openContextMenu(e, c.y7_id)}
+        role="presentation"
+      >
         <ContactRow
           label={c.nickname ?? truncateY7Id(c.y7_id, 8, 6)}
           sublabel={pending ?? (c.nickname ? truncateY7Id(c.y7_id, 6, 4) : undefined)}
@@ -140,6 +200,18 @@
     {/if}
   </div>
 </aside>
+
+<ContextMenu bind:open={ctxOpen} x={ctxX} y={ctxY} items={ctxItems} />
+
+<Modal
+  bind:open={deleteOpen}
+  title="delete chat"
+  description="this wipes messages, session, and contact on this device. the peer is notified to wipe theirs."
+  confirmLabel="delete"
+  cancelLabel="cancel"
+  tone="danger"
+  onConfirm={confirmDelete}
+/>
 
 <style>
   .sidebar {

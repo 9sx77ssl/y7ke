@@ -13,18 +13,19 @@
 <style>
   .toaster {
     position: fixed;
-    right: var(--y7-sp-5);
-    bottom: var(--y7-sp-5);
+    left: 0;
+    bottom: 0;
+    width: var(--y7-sz-sidebar);
+    padding: var(--y7-sp-2);
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;
     gap: var(--y7-sp-2);
     z-index: var(--y7-z-toast);
     pointer-events: none;
   }
   .toast {
     pointer-events: auto;
-    min-width: 140px;
-    max-width: 360px;
+    width: 100%;
     padding: var(--y7-sp-2) var(--y7-sp-4);
     background: var(--y7-bg-elevated);
     border: 1px solid var(--y7-border-default);

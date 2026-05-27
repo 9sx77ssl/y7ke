@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "Y7KE",
-        "width": 960,
-        "height": 720,
+        "width": 1024,
+        "height": 640,
         "minWidth": 720,
-        "minHeight": 540,
+        "minHeight": 480,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,

@@ -9,14 +9,11 @@
     openConversation,
     sendText,
   } from "../lib/stores/chat.svelte";
-  import { deleteContactAction, findContact } from "../lib/stores/contacts.svelte";
+  import { findContact } from "../lib/stores/contacts.svelte";
   import { getPresence, presenceLabel } from "../lib/stores/presence.svelte";
-  import { openEmpty } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
-  import { toast } from "../lib/components/toast.svelte";
   import { log } from "../lib/log";
   import Button from "../lib/components/Button.svelte";
-  import IconButton from "../lib/components/IconButton.svelte";
   import KeyDisplay from "../lib/components/KeyDisplay.svelte";
   import MessageBubble from "../lib/components/MessageBubble.svelte";
   import StatusDot from "../lib/components/StatusDot.svelte";
@@ -71,23 +68,6 @@
     await sendText(text);
   }
 
-  async function onDelete(): Promise<void> {
-    const ok = window.confirm(
-      "delete this chat forever? messages, session, and contact will be wiped on this device and the peer will be notified to wipe theirs.",
-    );
-    if (!ok) return;
-    logger.info("deleting contact", peerY7Id);
-    try {
-      await deleteContactAction(peerY7Id);
-      toast.success("chat deleted");
-      openEmpty();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error("delete failed", msg);
-      toast.error(`delete failed: ${msg}`);
-    }
-  }
-
   function handleKeydown(ev: KeyboardEvent): void {
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
@@ -120,29 +100,11 @@
       </span>
       <span class="presence">{presenceLabel(presence).toLowerCase()}</span>
     </div>
-    <div class="head-right">
-      {#if hasNickname}
+    {#if hasNickname}
+      <div class="head-right">
         <KeyDisplay value={peerY7Id} layout="inline" truncate />
-      {/if}
-      <IconButton
-        tone="danger"
-        size={28}
-        ariaLabel="delete chat"
-        title="delete this chat forever"
-        onclick={onDelete}
-      >
-        <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true">
-          <path
-            d="M3 4h8M5 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M4 4l.6 7a1 1 0 0 0 1 .9h2.8a1 1 0 0 0 1-.9L10 4M6 7v3M8 7v3"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-        </svg>
-      </IconButton>
-    </div>
+      </div>
+    {/if}
   </header>
 
   <div class="scroll" bind:this={scrollEl}>

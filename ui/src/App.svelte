@@ -6,13 +6,19 @@
   import Titlebar from "./lib/components/Titlebar.svelte";
   import Toaster from "./lib/components/Toaster.svelte";
 
-  // Boot: start event dispatch first (so identity_ready is captured even if
-  // the get_my_id command resolves slightly later), then poll for the ID.
+  // Suppress the native WebView right-click menu (Back / Forward / Reload).
+  // Components opt in to our custom ContextMenu where appropriate.
+  function suppressNativeContext(e: MouseEvent) {
+    e.preventDefault();
+  }
+
   $effect(() => {
     void startEventDispatch();
     void loadIdentity();
   });
 </script>
+
+<svelte:window oncontextmenu={suppressNativeContext} />
 
 <div class="shell">
   <Titlebar />
