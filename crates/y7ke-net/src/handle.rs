@@ -298,6 +298,16 @@ impl NetHandle {
         self.respond_sync(channel, response).await
     }
 
+    /// Replace the swarm's bootstrap-peer map. New addrs are added to Kad
+    /// and dialed; removed addrs are forgotten (live connections stay
+    /// until they drop naturally). Used on settings change.
+    pub async fn update_bootstraps(&self, addresses: Vec<Multiaddr>) -> Result<(), AppError> {
+        self.cmd_tx
+            .send(NetCommand::UpdateBootstraps { addresses })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))
+    }
+
     /// Request graceful shutdown. The swarm task will drain in-flight
     /// requests and exit. Subsequent commands return
     /// `AppError::Network("command channel closed")`.
@@ -366,6 +376,11 @@ pub enum NetCommand {
         channel: ResponseChannel<SyncResp>,
         response: SyncResp,
     },
+    /// Replace the swarm's tracked bootstrap-peer set. The swarm task
+    /// adds new entries to Kad + dials them; entries no longer in
+    /// `addresses` are removed from the redial loop (existing
+    /// connections persist).
+    UpdateBootstraps { addresses: Vec<Multiaddr> },
     /// Stop the swarm task.
     Shutdown,
 }

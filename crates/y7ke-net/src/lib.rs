@@ -39,7 +39,7 @@ pub use protocol::{
     SYNC_PROTOCOL,
 };
 pub use swarm::{
-    build_swarm, libp2p_keypair_from_y7_secret, peer_id_from_y7, spawn_swarm,
+    build_swarm, libp2p_keypair_from_y7_secret, multiaddr_is_lan, peer_id_from_y7, spawn_swarm,
     spawn_swarm_with_bootstraps, y7_id_from_peer_id, DEFAULT_BOOTSTRAPS, DEFAULT_LISTEN_ADDR,
 };
 

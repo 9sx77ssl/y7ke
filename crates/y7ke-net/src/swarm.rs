@@ -426,6 +426,35 @@ fn handle_command(
             }
         }
 
+        NetCommand::UpdateBootstraps { addresses } => {
+            let mut next: HashMap<PeerId, Multiaddr> = HashMap::new();
+            for addr in &addresses {
+                if let Some(peer) = peer_id_from_multiaddr(addr) {
+                    next.insert(peer, addr.clone());
+                } else {
+                    warn!(%addr, "update_bootstraps: addr missing /p2p/<peer-id>; ignoring");
+                }
+            }
+            // Seed Kad + dial anything new.
+            for (peer, addr) in &next {
+                if state.bootstrap_peers.contains_key(peer) {
+                    continue;
+                }
+                swarm.behaviour_mut().kad.add_address(peer, addr.clone());
+                if let Err(e) = swarm.dial(addr.clone()) {
+                    warn!(%addr, "update_bootstraps: dial failed: {e}");
+                } else {
+                    info!(%peer, %addr, "update_bootstraps: dialing new bootstrap");
+                }
+            }
+            state.bootstrap_peers = next;
+            if !state.bootstrap_peers.is_empty() {
+                if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+                    debug!("update_bootstraps: kad.bootstrap() failed: {e}");
+                }
+            }
+        }
+
         NetCommand::Shutdown => {
             // Handled by the caller of `handle_command`. Should never
             // arrive here in practice; if it does, we just no-op.
@@ -888,7 +917,7 @@ fn connection_kind_for(endpoint: &ConnectedPoint) -> ConnectionKind {
 /// We look at the first `Ip4` / `Ip6` component and apply RFC 1918 /
 /// IPv6 unique-local rules. Anything else (DNS names, public IPs,
 /// relay multiaddrs) is treated as non-LAN.
-fn multiaddr_is_lan(addr: &Multiaddr) -> bool {
+pub fn multiaddr_is_lan(addr: &Multiaddr) -> bool {
     for proto in addr.iter() {
         match proto {
             libp2p::multiaddr::Protocol::Ip4(ip) => {
