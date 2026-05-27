@@ -192,21 +192,29 @@ impl AppHandle {
 
     /// Fire-and-forget control via /y7ke/msg/1.0.0. Used by reject + delete.
     pub(crate) async fn send_control(&self, peer: &Y7Id, payload: messaging::ControlPayload) {
-        if self.inner.db.sessions().get(peer).await.ok().flatten().is_none() {
+        if self
+            .inner
+            .db
+            .sessions()
+            .get(peer)
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+        {
             tracing::debug!(%peer, "no session for control — skipping");
             return;
         }
         let conv = y7ke_core::ConversationId::between(&self.inner.my_y7_id, peer);
-        let Ok(conv_key) = messaging::derive_conv_key(&self.inner.me, peer.pubkey(), conv.as_bytes()) else {
+        let Ok(conv_key) =
+            messaging::derive_conv_key(&self.inner.me, peer.pubkey(), conv.as_bytes())
+        else {
             tracing::warn!(%peer, "derive_conv_key failed for control");
             return;
         };
-        let Ok((_mid, envelope, _ts)) = messaging::seal_control(
-            &self.inner.me,
-            &self.inner.my_pubkey,
-            &conv_key,
-            &payload,
-        ) else {
+        let Ok((_mid, envelope, _ts)) =
+            messaging::seal_control(&self.inner.me, &self.inner.my_pubkey, &conv_key, &payload)
+        else {
             tracing::warn!(%peer, "seal_control failed");
             return;
         };

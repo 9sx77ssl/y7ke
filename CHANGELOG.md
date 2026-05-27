@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.7] — 2026-05-27
+
+- fix(tauri): add custom-protocol feature for standalone binary builds
+
 ## [0.1.6] — 2026-05-27
 
 - ci: fix release workflow — tauri-cli semver, artifact paths, publish

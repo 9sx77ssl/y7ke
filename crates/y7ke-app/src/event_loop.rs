@@ -273,7 +273,8 @@ async fn handle_msg(
         return Err(AppError::network(format!("no session for {sender_y7}")));
     }
     let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
-    let conv_key = messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
+    let conv_key =
+        messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
     let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
     let kind = messaging::open_envelope(&envelope, &verifying, &conv_key)?;
 
@@ -755,7 +756,8 @@ async fn ingest_synced_envelope(
         return Err(AppError::network(format!("no session for {sender_y7}")));
     }
     let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
-    let conv_key = messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
+    let conv_key =
+        messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;
     let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
     let kind = messaging::open_envelope(envelope, &verifying, &conv_key)?;
     let text = match kind {

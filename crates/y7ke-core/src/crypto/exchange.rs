@@ -1,7 +1,9 @@
 //! X25519 ephemeral key exchange for session establishment.
 
 use rand::rngs::OsRng;
-use x25519_dalek::{EphemeralSecret as DalekEph, PublicKey as DalekPub, StaticSecret as DalekStatic};
+use x25519_dalek::{
+    EphemeralSecret as DalekEph, PublicKey as DalekPub, StaticSecret as DalekStatic,
+};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{AppError, Result};

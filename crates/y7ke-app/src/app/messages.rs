@@ -91,13 +91,10 @@ impl AppHandle {
             )));
         }
         let conversation_id = ConversationId::between(&self.inner.my_y7_id, &to);
-        let conv_key = messaging::derive_conv_key(&self.inner.me, to.pubkey(), conversation_id.as_bytes())?;
-        let (message_id, envelope, timestamp_ms) = messaging::seal_outgoing(
-            &self.inner.me,
-            &self.inner.my_pubkey,
-            &conv_key,
-            &text,
-        )?;
+        let conv_key =
+            messaging::derive_conv_key(&self.inner.me, to.pubkey(), conversation_id.as_bytes())?;
+        let (message_id, envelope, timestamp_ms) =
+            messaging::seal_outgoing(&self.inner.me, &self.inner.my_pubkey, &conv_key, &text)?;
 
         self.inner
             .db
