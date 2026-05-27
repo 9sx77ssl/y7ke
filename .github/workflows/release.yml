@@ -19,20 +19,11 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifacts: |
-              src-tauri/target/release/bundle/deb/*.deb
-              src-tauri/target/release/bundle/appimage/*.AppImage
+            label: linux
           - platform: macos-latest
-            target: aarch64-apple-darwin
-            artifacts: |
-              src-tauri/target/release/bundle/dmg/*.dmg
-              src-tauri/target/release/bundle/macos/*.app.tar.gz
+            label: macos
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifacts: |
-              src-tauri/target/release/bundle/msi/*.msi
-              src-tauri/target/release/bundle/nsis/*.exe
+            label: windows
 
     runs-on: ${{ matrix.platform }}
 
@@ -53,8 +44,6 @@ jobs:
             patchelf
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -79,16 +68,47 @@ jobs:
       - name: Install tauri-cli (prebuilt)
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@^2
+          tool: tauri-cli@2
 
       - name: Build (Tauri)
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: cargo tauri build
 
-      - name: Upload artifacts
+      # Rename the raw Linux binary so it has an unambiguous filename in the release.
+      - name: Package Linux binary
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          cp src-tauri/target/release/y7ke y7ke-linux-x86_64
+          tar czf y7ke-linux-x86_64.tar.gz y7ke-linux-x86_64
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: y7ke-${{ matrix.platform }}
-          path: ${{ matrix.artifacts }}
+          name: y7ke-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            y7ke-linux-x86_64.tar.gz
+          if-no-files-found: warn
+
+      - name: Upload macOS artifacts
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: y7ke-macos
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+          if-no-files-found: warn
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: y7ke-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
 
   release:
@@ -108,8 +128,8 @@ jobs:
           find artifacts -type f \( \
             -name '*.deb' -o \
             -name '*.AppImage' -o \
+            -name '*.tar.gz' -o \
             -name '*.dmg' -o \
-            -name '*.app.tar.gz' -o \
             -name '*.msi' -o \
             -name '*.exe' \
           \) -exec cp {} release/ \;
@@ -137,6 +157,6 @@ jobs:
           name: "Y7KE ${{ github.ref_name }}"
           body_path: ${{ steps.notes.outputs.body_path }}
           files: release/*
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
