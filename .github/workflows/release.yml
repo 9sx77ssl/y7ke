@@ -1,9 +1,22 @@
 name: release
 
+# Combined "tag + build + publish" pipeline.
+#
+# Triggers:
+#   - push to main → derive version from Cargo.toml; if no matching
+#     `vX.Y.Z` tag exists yet, create one and continue; if it does,
+#     skip silently. This is the auto-release path that fires for
+#     every commit (the pre-commit hook bumps the patch version).
+#   - push of a `v*` tag (manual) → build that tag.
+#
+# We have to do tag creation inside this workflow rather than in a
+# separate one because GITHUB_TOKEN-created tag pushes don't trigger
+# follow-up workflows (anti-loop policy).
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -13,22 +26,72 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
+  resolve:
+    name: resolve version + tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag:     ${{ steps.ver.outputs.tag }}
+      proceed: ${{ steps.gate.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            version=$(grep -E '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+            tag="v$version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "resolved $tag (version=$version)"
+
+      - name: Gate — is this tag already released?
+        id: gate
+        run: |
+          # If a release already exists for this tag, don't republish.
+          # gh CLI exits non-zero when the release isn't found.
+          if gh release view "${{ steps.ver.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "release for ${{ steps.ver.outputs.tag }} already exists — skipping"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true"  >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push tag if missing
+        if: steps.gate.outputs.proceed == 'true' && github.ref_type == 'branch'
+        run: |
+          if git rev-parse "refs/tags/${{ steps.ver.outputs.tag }}" >/dev/null 2>&1; then
+            echo "tag already exists locally — fine"
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "${{ steps.ver.outputs.tag }}"
+            git push origin "${{ steps.ver.outputs.tag }}"
+          fi
+
   build:
+    needs: resolve
+    if: needs.resolve.outputs.proceed == 'true'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: ubuntu-latest
-            label: linux
-          - platform: macos-latest
-            label: macos
-          - platform: windows-latest
-            label: windows
+        platform: [ubuntu-latest, macos-latest, windows-latest]
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
 
       - name: Install Linux deps
         if: matrix.platform == 'ubuntu-latest'
@@ -65,7 +128,7 @@ jobs:
         working-directory: ui
         run: pnpm install --frozen-lockfile
 
-      - name: Install tauri-cli (prebuilt)
+      - name: Install tauri-cli
         uses: taiki-e/install-action@v2
         with:
           tool: tauri-cli@2
@@ -73,7 +136,6 @@ jobs:
       - name: Build (Tauri)
         run: cargo tauri build
 
-      # Rename the raw Linux binary so it has an unambiguous filename in the release.
       - name: Package Linux binary
         if: matrix.platform == 'ubuntu-latest'
         run: |
@@ -111,11 +173,14 @@ jobs:
             target/release/bundle/nsis/*.exe
           if-no-files-found: warn
 
-  release:
-    needs: build
+  publish:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -138,23 +203,24 @@ jobs:
       - name: Extract CHANGELOG section for this tag
         id: notes
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          version="${{ needs.resolve.outputs.version }}"
           if [ -f CHANGELOG.md ]; then
-            awk -v ver="$tag" '
+            awk -v ver="$version" '
               $0 ~ "^## \\[" ver "\\]" { capture=1; print; next }
               capture && /^## \[/ { exit }
               capture { print }
             ' CHANGELOG.md > release/NOTES.md
           fi
           if [ ! -s release/NOTES.md ]; then
-            echo "_(no CHANGELOG entry for ${GITHUB_REF_NAME})_" > release/NOTES.md
+            echo "_(no CHANGELOG entry for v$version)_" > release/NOTES.md
           fi
           echo "body_path=release/NOTES.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Y7KE ${{ github.ref_name }}"
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: "Y7KE ${{ needs.resolve.outputs.tag }}"
           body_path: ${{ steps.notes.outputs.body_path }}
           files: release/*
           draft: false
