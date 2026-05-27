@@ -135,7 +135,9 @@ impl AppHandle {
     }
 }
 
-/// Background sender: timeout-wrapped send_msg + status update + retry enqueue.
+/// Background sender: timeout-wrapped send_msg + enqueue on failure.
+/// Status stays Sending until the retry driver delivers and flips it to Delivered.
+/// Failed is reserved for genuine unrecoverable errors, not "peer offline".
 async fn push_one(
     inner: &Arc<AppInner>,
     event_tx: &broadcast::Sender<AppEvent>,
@@ -145,22 +147,23 @@ async fn push_one(
     req: y7ke_net::protocol::MsgReq,
 ) {
     let result = tokio::time::timeout(SEND_TIMEOUT, inner.net.send_msg(peer_id, req)).await;
-    let new_status = match result {
-        Ok(Ok(resp)) if resp.ack => MessageStatus::Delivered,
+    match result {
+        Ok(Ok(resp)) if resp.ack => {
+            let _ = inner
+                .db
+                .messages()
+                .update_status(&message_id, MessageStatus::Delivered)
+                .await;
+            let _ = event_tx.send(AppEvent::MessageStatusChanged {
+                message_id: message_id.to_string(),
+                status: MessageStatus::Delivered,
+            });
+        }
         other => {
-            tracing::warn!(?other, %to, "send_msg failed; enqueuing");
+            // Peer unreachable or timeout — queue for retry; status stays Sending.
+            tracing::warn!(?other, %to, "send_msg failed; enqueuing for retry");
             let next = crate::event_loop::next_retry_at(0);
             let _ = inner.db.sync_queue().enqueue(&message_id, &to, next).await;
-            MessageStatus::Failed
         }
-    };
-    let _ = inner
-        .db
-        .messages()
-        .update_status(&message_id, new_status)
-        .await;
-    let _ = event_tx.send(AppEvent::MessageStatusChanged {
-        message_id: message_id.to_string(),
-        status: new_status,
-    });
+    }
 }

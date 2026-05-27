@@ -10,33 +10,50 @@
 </script>
 
 <script lang="ts">
-  // Chat message bubble. Variants per author (mine | theirs) and per status
-  // (a `failed` ribbon for status===4). The subscript meta row carries a
-  // timestamp + a status glyph; the glyph is suppressed for messages we
-  // received (a tick on someone else's bubble is meaningless).
-
-  import { formatTimestamp, statusBadge } from "../format";
+  import { formatTimestamp, statusLabel } from "../format";
 
   let { text, timestampMs, isMine, status }: MessageBubbleProps = $props();
 
-  const badge = $derived(statusBadge(status));
-  const failed = $derived(status === 4);
+  const label = $derived(statusLabel(status));
 </script>
 
 <article
   class="bubble"
   class:mine={isMine}
   class:theirs={!isMine}
-  class:failed
 >
-  <div class="text" data-selectable>{text}</div>
+  <div class="text">{text}</div>
   <div class="meta">
-    <span class="ts" title="sent {new Date(timestampMs).toLocaleString()}">
+    <span class="ts" title={new Date(timestampMs).toLocaleString()}>
       {formatTimestamp(timestampMs)}
     </span>
     {#if isMine}
-      <span class="status tone-{badge.tone}" title={badge.label.toLowerCase()}>
-        {badge.glyph}
+      <span class="status" class:failed title={label}>
+        {#if status === 0}
+          <!-- clock: sending -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="7" cy="7" r="5.5"/>
+            <path d="M7 4v3.5L9.5 9"/>
+          </svg>
+        {:else if status === 1}
+          <!-- single check: sent -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.5 6L5.5 10L11.5 2"/>
+          </svg>
+        {:else if status === 2 || status === 3}
+          <!-- double check: delivered / synced -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="17" height="12" viewBox="0 0 17 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 6L5 10L11 2"/>
+            <path d="M6 6L10 10L16 2"/>
+          </svg>
+        {:else if status === 4}
+          <!-- circle exclamation: failed -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="7" cy="7" r="5.5"/>
+            <path d="M7 4.5v3.5"/>
+            <circle cx="7" cy="10.5" r="0.6" fill="currentColor" stroke="none"/>
+          </svg>
+        {/if}
       </span>
     {/if}
   </div>
@@ -64,13 +81,9 @@
   .bubble.theirs {
     align-self: flex-start;
   }
-  .bubble.failed {
-    border-color: var(--y7-red-dim);
-    background: var(--y7-red-soft);
-  }
-
   .text {
     white-space: pre-wrap;
+    user-select: text;
   }
   .meta {
     display: flex;
@@ -81,21 +94,18 @@
     font-size: var(--y7-fs-xs);
     color: var(--y7-text-muted);
     letter-spacing: 0.02em;
+    user-select: none;
   }
   .ts {
     text-transform: lowercase;
   }
   .status {
-    font-family: var(--y7-font-mono);
-    letter-spacing: 0;
-  }
-  .status.tone-muted {
+    display: flex;
+    align-items: center;
     color: var(--y7-text-muted);
+    line-height: 1;
   }
-  .status.tone-ok {
-    color: var(--y7-green);
-  }
-  .status.tone-warn {
+  .status.failed {
     color: var(--y7-red);
   }
 

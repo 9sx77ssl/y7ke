@@ -73,21 +73,14 @@ export function formatRelativeShort(
   });
 }
 
-/** Map a message status integer to a printable badge. */
-export function statusBadge(
-  status: 0 | 1 | 2 | 3 | 4,
-): { label: string; glyph: string; tone: "muted" | "ok" | "warn" } {
+/** Map a message status integer to a human-readable label. */
+export function statusLabel(status: 0 | 1 | 2 | 3 | 4): string {
   switch (status) {
-    case 0:
-      return { label: "Sending", glyph: "…", tone: "muted" };
-    case 1:
-      return { label: "Sent", glyph: "✓", tone: "muted" };
-    case 2:
-      return { label: "Delivered", glyph: "✓✓", tone: "ok" };
-    case 3:
-      return { label: "Synced", glyph: "✓✓", tone: "ok" };
-    case 4:
-      return { label: "Failed", glyph: "!", tone: "warn" };
+    case 0: return "Sending";
+    case 1: return "Sent";
+    case 2: return "Delivered";
+    case 3: return "Synced";
+    case 4: return "Failed";
   }
 }
 
