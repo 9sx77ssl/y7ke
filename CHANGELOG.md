@@ -7,6 +7,32 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.18] — 2026-05-27
+
+### Fixed
+- **Root cause for "invisible messages" bug** (versions 0.1.5–0.1.17):
+  `MessageBubble.svelte:31` had `class:failed` (Svelte shorthand) without
+  an `={expr}` — Svelte interprets this as "apply `failed` class if a
+  variable named `failed` is truthy". The variable had been deleted in
+  the SVG-icon refactor but the binding survived. Every "mine" message
+  render threw `ReferenceError: Can't find variable: failed`, which
+  Svelte propagated out of the render effect and tore down the entire
+  `{#each chat.messages as msg}` block — including any unrelated
+  panels on the same screen. The chat store kept accumulating messages
+  correctly (debug logs proved `stateLen=7..10`); the {#each} simply
+  couldn't paint a single bubble.
+
+  The bug was invisible because the previous diagnostic effort
+  exclusively read **backend** logs (Rust + UI debug routed through
+  `log_from_ui`). The actual `ReferenceError` lived in the WebKit
+  JavaScript console and never reached those logs. The fix is one line:
+  `class:failed={status === 4}`.
+
+  Side effects fixed by the same one-liner: greeting in the Requests
+  pane was also blanked out whenever a chat had been opened in the same
+  session (any render that touched MessageBubble would die mid-tree).
+
+
 ## [0.1.17] — 2026-05-27
 
 - fix(ui): expose chat store as direct $state — getter pattern lost reactivity

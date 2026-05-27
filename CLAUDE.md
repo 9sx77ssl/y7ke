@@ -41,6 +41,20 @@ docs/                  # ARCHITECTURE, ROADMAP
   `#[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)]`
   because GitHub Actions runners don't surface peers reliably. They run
   on Linux CI + locally on any platform.
+- **UI silently broken? Open the WebKit JS console first** (Ctrl+Shift+I
+  in any Tauri window). The 0.1.5–0.1.17 "invisible messages" bug was a
+  single `class:failed` Svelte binding without `={expr}` — Svelte
+  interpreted it as "apply if the variable `failed` is truthy", the
+  variable didn't exist, `ReferenceError` killed the `{#each}` tree on
+  every render with `is_mine=true`. Backend logs and store tracing all
+  showed `stateLen=10`; only the JS console exposed the error. Build
+  failures, store-vs-UI desyncs, "reactivity is broken" symptoms — check
+  the browser console **before** rewriting Svelte stores or rebuilding
+  Vite.
+- **Svelte shorthand bindings need `={expr}`.** `class:foo` without `=`
+  references a variable named `foo` in scope. If `foo` isn't a top-level
+  binding in the component, it throws at render. Always use
+  `class:foo={booleanExpr}` unless you've also declared `let foo`.
 
 ## Useful commands
 

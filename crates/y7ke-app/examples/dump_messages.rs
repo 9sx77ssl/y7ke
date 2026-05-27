@@ -53,7 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute the conv id the same way AppHandle does.
     let conv = ConversationId::between(&my_y7, &peer);
-    println!("conv_id  = {} (uppercase: {})", conv.to_hex(), conv.to_hex().to_uppercase());
+    println!(
+        "conv_id  = {} (uppercase: {})",
+        conv.to_hex(),
+        conv.to_hex().to_uppercase()
+    );
 
     // Sessions DAO sanity check.
     match db.sessions().get(&peer).await? {
@@ -61,7 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "session  = present (established_at={}, last_used_at={})",
             s.established_at, s.last_used_at
         ),
-        None => println!("session  = MISSING — list_messages would still work, but send_message wouldn't"),
+        None => println!(
+            "session  = MISSING — list_messages would still work, but send_message wouldn't"
+        ),
     }
 
     // Contacts dump.
