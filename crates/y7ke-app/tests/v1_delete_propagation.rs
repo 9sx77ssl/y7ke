@@ -43,9 +43,10 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
         retry_until_ok(|| alice.send_contact_request(bob_id, Some("hi".into()))),
     )
     .await??;
-    wait_for_event(&mut bob_events, |ev| {
-        matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri())
-    })
+    wait_for_event(
+        &mut bob_events,
+        |ev| matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri()),
+    )
     .await?;
     let pending = bob.list_pending_requests().await?;
     let req = pending
@@ -55,16 +56,18 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
     bob.accept_request(req.id).await?;
 
     // Alice should receive the AcceptedRequest control → contact promoted.
-    wait_for_event(&mut alice_events, |ev| {
-        matches!(ev, AppEvent::ContactAdded { y7_id, .. } if *y7_id == bob_id.to_uri())
-    })
+    wait_for_event(
+        &mut alice_events,
+        |ev| matches!(ev, AppEvent::ContactAdded { y7_id, .. } if *y7_id == bob_id.to_uri()),
+    )
     .await?;
 
     // Bob deletes the chat. Alice should see ContactRemoved.
     bob.delete_contact(alice_id).await?;
-    wait_for_event(&mut alice_events, |ev| {
-        matches!(ev, AppEvent::ContactRemoved { y7_id } if *y7_id == bob_id.to_uri())
-    })
+    wait_for_event(
+        &mut alice_events,
+        |ev| matches!(ev, AppEvent::ContactRemoved { y7_id } if *y7_id == bob_id.to_uri()),
+    )
     .await?;
 
     // Alice's local state is wiped.
