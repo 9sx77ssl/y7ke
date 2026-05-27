@@ -27,6 +27,10 @@ use crate::{event_loop, handshake, identity, messaging};
 /// seconds.
 pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 
+/// Maximum plaintext bytes for a V1 message (text only). Caps are enforced on
+/// both send and receive paths to bound memory usage from adversarial peers.
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
 /// All the configuration AppHandle needs.
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -129,9 +133,34 @@ impl AppHandle {
         if peer == self.inner.my_y7_id {
             return Err(AppError::invalid_input("cannot add yourself as a contact"));
         }
+        // C1 defence-in-depth: peer_id_from_y7 also validates, but doing it up
+        // front gives a clean error before we touch storage or the network.
+        let peer_id = peer_id_from_y7(&peer)?;
 
-        // Always store the outgoing request locally so the UI shows it
-        // regardless of whether the peer is currently reachable.
+        // H1: idempotent. If we already have a session for this peer, the
+        // contact was added earlier — never re-handshake (would overwrite the
+        // session and silently break any messages already in sync_queue).
+        if let Some(_existing) = self.inner.db.sessions().get(&peer).await? {
+            // Make sure a contact row exists in some form so the UI can show
+            // them. If the contact row was deleted but the session remained,
+            // recreate as pending_out.
+            if self.inner.db.contacts().get(&peer).await?.is_none() {
+                self.inner
+                    .db
+                    .contacts()
+                    .insert(NewContact {
+                        y7_id: peer,
+                        ed25519_pub: *peer.pubkey(),
+                        nickname: None,
+                        status: ContactStatus::PendingOut,
+                    })
+                    .await?;
+            }
+            return Ok(());
+        }
+
+        // Store the outgoing request locally so the UI shows it regardless of
+        // whether the peer is currently reachable.
         self.inner
             .db
             .requests()
@@ -152,9 +181,10 @@ impl AppHandle {
             })
             .await?;
 
-        // Try the handshake. If it fails the user retries; V1 does not auto-retry.
-        let _ = self.inner.net.dial(peer).await;
-        let peer_id = peer_id_from_y7(&peer);
+        // H4: surface dial errors instead of silently swallowing them.
+        if let Err(e) = self.inner.net.dial(peer).await {
+            tracing::warn!(error = %e, %peer, "dial command failed; proceeding to handshake anyway");
+        }
         let (req, eph) = handshake::open_initiator(
             &self.inner.me,
             &self.inner.my_pubkey,
@@ -319,6 +349,14 @@ impl AppHandle {
         if to == self.inner.my_y7_id {
             return Err(AppError::invalid_input("cannot message yourself"));
         }
+        // M2: cap message size before we even encrypt it.
+        if text.len() > MAX_MESSAGE_BYTES {
+            return Err(AppError::invalid_input(format!(
+                "message exceeds {MAX_MESSAGE_BYTES} bytes ({} bytes given)",
+                text.len()
+            )));
+        }
+        let peer_id = peer_id_from_y7(&to)?;
         let session = self.inner.db.sessions().get(&to).await?.ok_or_else(|| {
             AppError::invalid_input(format!(
                 "no established session with {to} — add them as a contact first"
@@ -349,18 +387,20 @@ impl AppHandle {
             })
             .await?;
 
-        let peer_id = peer_id_from_y7(&to);
         let req = y7ke_net::protocol::MsgReq { envelope };
         match self.inner.net.send_msg(peer_id, req).await {
             Ok(resp) if resp.ack => {
+                // M1: peer ack means both sides hold the row — go straight to
+                // `Synced`. Without this we'd be stuck at `Sent` forever in V1
+                // since the explicit SyncReq::Ack flow is never initiated.
                 self.inner
                     .db
                     .messages()
-                    .update_status(&message_id, MessageStatus::Sent)
+                    .update_status(&message_id, MessageStatus::Synced)
                     .await?;
                 let _ = self.event_tx.send(AppEvent::MessageStatusChanged {
                     message_id: message_id.to_string(),
-                    status: MessageStatus::Sent,
+                    status: MessageStatus::Synced,
                 });
             }
             _ => {

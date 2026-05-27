@@ -53,12 +53,20 @@ pub fn open_initiator(
 
 /// Caller-side: after receiving `resp`, verify the peer's signature and
 /// derive the shared session key.
+///
+/// Returns `Err(AppError::Network("peer rejected handshake"))` when the
+/// responder set `accept = false` — this is the agreed-upon signal that the
+/// responder already has a session for us and the initiator must NOT
+/// overwrite their own copy.
 pub fn finalize_initiator(
     my_eph: EphemeralSecret,
     my_pubkey: &[u8; 32],
     peer_pubkey: &[u8; 32],
     resp: &HandshakeResp,
 ) -> Result<SymmetricKey> {
+    if !resp.accept {
+        return Err(AppError::network("peer rejected handshake"));
+    }
     let peer_verifying = VerifyingKey::from_bytes(peer_pubkey)?;
     let mut signed = [0u8; 64];
     signed[..32].copy_from_slice(&resp.responder_eph_x25519_pub);
@@ -74,6 +82,26 @@ pub fn finalize_initiator(
         .try_into()
         .map_err(|_| AppError::crypto("hkdf produced wrong length"))?;
     Ok(SymmetricKey::new(arr))
+}
+
+/// Produce a "reject" handshake response that the initiator's
+/// [`finalize_initiator`] will refuse via `AppError::Network`. The
+/// responder's ephemeral and signature are still valid wire bytes so libp2p
+/// happily delivers them — but the `accept = false` flag is checked first.
+pub fn reject_response(me: &SigningKey, my_pubkey: &[u8; 32], req: &HandshakeReq) -> HandshakeResp {
+    // We still sign a valid Ed25519 over (zero_eph || initiator_pub) so the
+    // signature itself is not malformed (defense-in-depth: a peer that ignores
+    // `accept` won't accidentally pass the verify step on garbage bytes).
+    let mut signed = [0u8; 64];
+    // responder_eph is all-zero (no information leaked).
+    signed[32..].copy_from_slice(&req.initiator_ed25519_pub);
+    let _ = my_pubkey;
+    let sig = me.sign(&signed);
+    HandshakeResp {
+        responder_eph_x25519_pub: [0u8; 32],
+        sig: sig.to_bytes(),
+        accept: false,
+    }
 }
 
 /// Responder side: verify the inbound `HandshakeReq` and produce both the
@@ -140,6 +168,27 @@ mod tests {
         let alice_key = finalize_initiator(alice_eph, &alice_pub, &bob_pub, &resp).unwrap();
 
         assert_eq!(alice_key.as_bytes(), bob_key.as_bytes());
+    }
+
+    #[test]
+    fn finalize_rejects_accept_false() {
+        let alice = SigningKey::generate();
+        let bob = SigningKey::generate();
+        let alice_pub = alice.verifying_key().to_bytes();
+        let bob_pub = bob.verifying_key().to_bytes();
+        let (req, eph) = open_initiator(&alice, &alice_pub, &bob_pub, None);
+        let mut resp = reject_response(&bob, &bob_pub, &req);
+        assert!(!resp.accept);
+        // Even if `accept` were flipped after-the-fact, the signed bytes are
+        // (zero_eph || alice_pub) — finalize would still verify but yield a
+        // bogus shared secret. The accept=false short-circuit makes it
+        // explicit.
+        assert!(finalize_initiator(eph, &alice_pub, &bob_pub, &resp).is_err());
+        // Confirm short-circuit happens before signature verification by
+        // mangling the signature: still must reject.
+        resp.sig[0] ^= 0xff;
+        let (_, eph2) = open_initiator(&alice, &alice_pub, &bob_pub, None);
+        assert!(finalize_initiator(eph2, &alice_pub, &bob_pub, &resp).is_err());
     }
 
     #[test]

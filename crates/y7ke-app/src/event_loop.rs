@@ -59,7 +59,9 @@ async fn dispatch(
         NetEvent::PeerDiscovered { peer, addrs, y7_id } => {
             tracing::debug!(peer = %peer, addrs = ?addrs, y7_id = ?y7_id, "peer discovered");
             if let Some(y7) = y7_id {
-                drain_queue_for_peer(inner, &y7, peer).await?;
+                drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+            } else {
+                tracing::warn!(%peer, "peer discovered without recoverable Y7Id");
             }
             Ok(())
         }
@@ -69,7 +71,9 @@ async fn dispatch(
                     y7_id: y7.to_uri(),
                     connection: kind,
                 });
-                drain_queue_for_peer(inner, &y7, peer).await?;
+                drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+            } else {
+                tracing::warn!(%peer, "connection established with non-Ed25519 peer (V1 should never see this)");
             }
             Ok(())
         }
@@ -79,19 +83,21 @@ async fn dispatch(
                     y7_id: y7.to_uri(),
                     connection: ConnectionKind::Offline,
                 });
+            } else {
+                tracing::debug!(%peer, "connection closed for non-Ed25519 peer");
             }
             Ok(())
         }
         NetEvent::HandshakeReceived {
-            peer: _,
+            peer,
             request,
             channel,
-        } => handle_handshake(inner, event_tx, request, channel).await,
+        } => handle_handshake(inner, event_tx, peer, request, channel).await,
         NetEvent::MsgReceived {
-            peer: _,
+            peer,
             request,
             channel,
-        } => handle_msg(inner, event_tx, request.envelope, channel).await,
+        } => handle_msg(inner, event_tx, peer, request.envelope, channel).await,
         NetEvent::SyncReceived {
             peer,
             request,
@@ -107,26 +113,56 @@ async fn dispatch(
 async fn handle_handshake(
     inner: &Arc<AppInner>,
     event_tx: &broadcast::Sender<AppEvent>,
+    libp2p_peer: PeerId,
     request: y7ke_net::protocol::HandshakeReq,
     channel: y7ke_net::handle::TakeOnce<
         libp2p::request_response::ResponseChannel<y7ke_net::protocol::HandshakeResp>,
     >,
 ) -> Result<()> {
+    // M4: bind libp2p PeerId to the claimed initiator Ed25519 pubkey. The
+    // Noise handshake already proved ownership of the libp2p key, and the
+    // application signature inside the request proves ownership of
+    // initiator_ed25519_pub. If these point to two different identities the
+    // peer is misbehaving — refuse without touching storage.
+    let claimed_id = y7ke_core::Y7Id::from_pubkey(request.initiator_ed25519_pub);
+    let expected_peer = y7ke_net::peer_id_from_y7(&claimed_id)?;
+    if expected_peer != libp2p_peer {
+        tracing::warn!(
+            connection_peer = %libp2p_peer,
+            claimed = %claimed_id,
+            "rejecting handshake — claimed identity does not match connection PeerId"
+        );
+        let reject = handshake::reject_response(&inner.me, &inner.my_pubkey, &request);
+        inner.net.respond_handshake_take(channel, reject).await?;
+        return Ok(());
+    }
+
     let greeting = request.greeting.clone();
+
+    // H1 backstop: if we already have a session for this peer, refuse to
+    // overwrite it. Send `accept = false`; the initiator's
+    // `finalize_initiator` rejects and keeps its own session intact.
+    if inner.db.sessions().get(&claimed_id).await?.is_some() {
+        tracing::debug!(%claimed_id, "handshake from peer with existing session — rejecting to preserve session keys");
+        let reject = handshake::reject_response(&inner.me, &inner.my_pubkey, &request);
+        inner.net.respond_handshake_take(channel, reject).await?;
+        return Ok(());
+    }
+
     let (resp, session_key, initiator_y7) =
         handshake::respond(&inner.me, &inner.my_pubkey, &request)?;
+    debug_assert_eq!(initiator_y7, claimed_id, "respond() must derive same Y7Id");
 
-    // Persist session.
     inner
         .db
         .sessions()
         .upsert(&initiator_y7, session_key)
         .await?;
 
-    // Upsert pending-in contact.
+    // Upsert pending-in contact (only if new).
     let existing = inner.db.contacts().get(&initiator_y7).await?;
-    let was_new = existing.is_none();
-    if existing.is_none() {
+    let was_new_contact = existing.is_none();
+    if was_new_contact {
         inner
             .db
             .contacts()
@@ -139,21 +175,32 @@ async fn handle_handshake(
             .await?;
     }
 
-    // Insert a request row so the UI surfaces it.
-    inner
+    // H3: only insert a request row if no pending one already exists for
+    // this peer. Otherwise a replayed HandshakeReq would spam the UI.
+    let already_pending = inner
         .db
         .requests()
-        .insert(NewRequest {
-            direction: RequestDirection::Incoming,
-            peer_y7_id: initiator_y7,
-            initial_text: greeting.clone(),
-        })
-        .await?;
+        .list_pending(Some(RequestDirection::Incoming))
+        .await?
+        .into_iter()
+        .any(|r| r.peer_y7_id == initiator_y7);
+
+    if !already_pending {
+        inner
+            .db
+            .requests()
+            .insert(NewRequest {
+                direction: RequestDirection::Incoming,
+                peer_y7_id: initiator_y7,
+                initial_text: greeting.clone(),
+            })
+            .await?;
+    }
 
     // Respond on the wire.
     inner.net.respond_handshake_take(channel, resp).await?;
 
-    if was_new {
+    if was_new_contact && !already_pending {
         let _ = event_tx.send(AppEvent::RequestReceived {
             y7_id: initiator_y7.to_uri(),
             greeting,
@@ -165,10 +212,40 @@ async fn handle_handshake(
 async fn handle_msg(
     inner: &Arc<AppInner>,
     event_tx: &broadcast::Sender<AppEvent>,
+    libp2p_peer: PeerId,
     envelope: MessageEnvelope,
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<MsgResp>>,
 ) -> Result<()> {
+    // M2: cap ciphertext size. ChaCha20-Poly1305 adds a 16-byte tag, so allow
+    // MAX_MESSAGE_BYTES + 16 + some slack.
+    if envelope.ciphertext.len() > crate::app::MAX_MESSAGE_BYTES + 256 {
+        tracing::warn!(
+            size = envelope.ciphertext.len(),
+            "rejecting oversized inbound message"
+        );
+        inner
+            .net
+            .respond_msg_take(channel, MsgResp { ack: false })
+            .await?;
+        return Ok(());
+    }
+
     let sender_y7 = Y7Id::from_pubkey(envelope.sender_pub);
+
+    // M4: verify the connection's PeerId matches the claimed sender pubkey.
+    let expected_peer = y7ke_net::peer_id_from_y7(&sender_y7)?;
+    if expected_peer != libp2p_peer {
+        tracing::warn!(
+            connection_peer = %libp2p_peer,
+            claimed = %sender_y7,
+            "rejecting message — sender does not match connection PeerId"
+        );
+        inner
+            .net
+            .respond_msg_take(channel, MsgResp { ack: false })
+            .await?;
+        return Ok(());
+    }
 
     // Need a session — established by an earlier handshake.
     let session = inner
@@ -221,10 +298,23 @@ async fn handle_msg(
 
 async fn handle_sync(
     inner: &Arc<AppInner>,
-    _peer: PeerId,
+    peer: PeerId,
     request: SyncReq,
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<SyncResp>>,
 ) -> Result<()> {
+    // H2: identify the requester so we can scope conversation-pulls to a
+    // single (self, requester) pair. Anyone else who has guessed at a
+    // ConversationId must not get messages back.
+    let requester_y7 = match y7ke_net::y7_id_from_peer_id(&peer) {
+        Some(y7) => y7,
+        None => {
+            tracing::warn!(%peer, "sync request from non-Ed25519 peer; refusing");
+            let resp = empty_sync_resp_for(&request);
+            inner.net.respond_sync_take(channel, resp).await?;
+            return Ok(());
+        }
+    };
+
     let resp = match request {
         SyncReq::Header { conversations: _ } => {
             // V1 minimal sync: respond with empty digest (we use queue-based
@@ -236,41 +326,64 @@ async fn handle_sync(
             since,
             limit,
         } => {
-            let conv = ConversationId(conversation_id);
-            let since_id = since.map(y7ke_core::MessageId::from_bytes);
-            let rows = inner
-                .db
-                .messages()
-                .pull_after(&conv, since_id, limit as i64)
-                .await?;
-            let envelopes: Vec<MessageEnvelope> = rows
-                .into_iter()
-                .map(|m| MessageEnvelope {
-                    message_id: *m.message_id.as_bytes(),
-                    sender_pub: m.sender_pub,
-                    timestamp_ms: m.timestamp_ms,
-                    nonce: m.payload_nonce,
-                    ciphertext: m.payload_enc,
-                    sig: m.sig,
-                })
-                .collect();
-            let has_more = envelopes.len() as u16 == limit;
-            SyncResp::Pull {
-                envelopes,
-                has_more,
+            // H2: only return messages for the (self, requester) conversation.
+            let expected = ConversationId::between(&inner.my_y7_id, &requester_y7);
+            if expected.0 != conversation_id {
+                tracing::warn!(
+                    requester = %requester_y7,
+                    "sync Pull for non-participating conversation; refusing"
+                );
+                SyncResp::Pull {
+                    envelopes: Vec::new(),
+                    has_more: false,
+                }
+            } else {
+                let since_id = since.map(y7ke_core::MessageId::from_bytes);
+                let rows = inner
+                    .db
+                    .messages()
+                    .pull_after(&expected, since_id, limit as i64)
+                    .await?;
+                let envelopes: Vec<MessageEnvelope> = rows
+                    .into_iter()
+                    .map(|m| MessageEnvelope {
+                        message_id: *m.message_id.as_bytes(),
+                        sender_pub: m.sender_pub,
+                        timestamp_ms: m.timestamp_ms,
+                        nonce: m.payload_nonce,
+                        ciphertext: m.payload_enc,
+                        sig: m.sig,
+                    })
+                    .collect();
+                let has_more = envelopes.len() as u16 == limit;
+                SyncResp::Pull {
+                    envelopes,
+                    has_more,
+                }
             }
         }
         SyncReq::Ack {
-            conversation_id: _,
+            conversation_id,
             confirmed_ids,
         } => {
-            for mid in confirmed_ids {
-                let id = y7ke_core::MessageId::from_bytes(mid);
-                let _ = inner
-                    .db
-                    .messages()
-                    .update_status(&id, MessageStatus::Synced)
-                    .await;
+            // H2: same scoping rule for Ack — only honor for the
+            // (self, requester) conversation, and only for messages addressed
+            // to the requester.
+            let expected = ConversationId::between(&inner.my_y7_id, &requester_y7);
+            if expected.0 != conversation_id {
+                tracing::warn!(
+                    requester = %requester_y7,
+                    "sync Ack for non-participating conversation; ignoring"
+                );
+            } else {
+                for mid in confirmed_ids {
+                    let id = y7ke_core::MessageId::from_bytes(mid);
+                    let _ = inner
+                        .db
+                        .messages()
+                        .update_status(&id, MessageStatus::Synced)
+                        .await;
+                }
             }
             SyncResp::Ack
         }
@@ -279,21 +392,31 @@ async fn handle_sync(
     Ok(())
 }
 
+fn empty_sync_resp_for(req: &SyncReq) -> SyncResp {
+    match req {
+        SyncReq::Header { .. } => SyncResp::HeaderAck { ours: Vec::new() },
+        SyncReq::Pull { .. } => SyncResp::Pull {
+            envelopes: Vec::new(),
+            has_more: false,
+        },
+        SyncReq::Ack { .. } => SyncResp::Ack,
+    }
+}
+
 /// On peer reconnect, retry any outbound messages we have queued for them.
-/// Successful sends drop the row from `sync_queue` and update `messages.status`.
+/// Successful sends drop the row from `sync_queue` and update
+/// `messages.status` to `Synced` (peer acked → both sides hold the row).
 async fn drain_queue_for_peer(
     inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
     peer_y7: &Y7Id,
     peer_id: PeerId,
 ) -> Result<()> {
-    // Fetch all due entries (now + huge limit). For V1 we drain everything;
-    // V2 will respect a smaller limit.
     let due = inner.db.sync_queue().due(i64::MAX, 256).await?;
     for entry in due {
         if &entry.target_peer_y7_id != peer_y7 {
             continue;
         }
-        // Look up the message and re-send.
         let conv = ConversationId::between(&inner.my_y7_id, peer_y7);
         let messages = inner
             .db
@@ -326,19 +449,23 @@ async fn drain_queue_for_peer(
             .await
         {
             Ok(resp) if resp.ack => {
+                // M1: peer acked → both sides hold it → Synced (not Sent).
                 inner
                     .db
                     .messages()
-                    .update_status(&message.message_id, MessageStatus::Sent)
+                    .update_status(&message.message_id, MessageStatus::Synced)
                     .await?;
                 inner
                     .db
                     .sync_queue()
                     .remove(&message.message_id, peer_y7)
                     .await?;
+                let _ = event_tx.send(AppEvent::MessageStatusChanged {
+                    message_id: message.message_id.to_string(),
+                    status: MessageStatus::Synced,
+                });
             }
             Ok(_) | Err(_) => {
-                // Peer refused or transport blip — bump retry.
                 let next = next_retry_at(entry.attempts);
                 inner
                     .db

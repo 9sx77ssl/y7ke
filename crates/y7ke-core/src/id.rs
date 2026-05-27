@@ -38,6 +38,12 @@ impl Y7Id {
         )
     }
 
+    /// Parse a `y7:<base58>` URI. Validates structure (length, base58
+    /// alphabet) but does NOT confirm the decoded bytes form a valid Ed25519
+    /// point — that check happens at the network boundary via
+    /// [`crate::crypto::VerifyingKey::from_bytes`] and at the libp2p mapping
+    /// via `peer_id_from_y7`. Use [`Self::parse_strict`] at user-facing
+    /// entry points (Tauri commands) to fail-fast on garbage URIs.
     pub fn parse(s: &str) -> Result<Self> {
         let body = s.strip_prefix(Self::URI_PREFIX).ok_or_else(|| {
             AppError::InvalidY7Id(format!("missing '{}' prefix", Self::URI_PREFIX))
@@ -52,6 +58,18 @@ impl Y7Id {
             )));
         }
         Ok(Self { pubkey: buf })
+    }
+
+    /// Strict variant of [`Self::parse`] that ALSO verifies the decoded bytes
+    /// form a valid Ed25519 public key. Use at IPC boundaries (Tauri commands)
+    /// so adversarial input is rejected before it can panic libp2p or trigger
+    /// expensive downstream operations.
+    pub fn parse_strict(s: &str) -> Result<Self> {
+        let y7 = Self::parse(s)?;
+        crate::crypto::VerifyingKey::from_bytes(&y7.pubkey).map_err(|_| {
+            AppError::InvalidY7Id("decoded bytes are not a valid Ed25519 public key".into())
+        })?;
+        Ok(y7)
     }
 }
 
@@ -184,6 +202,24 @@ mod tests {
     fn y7id_rejects_garbage() {
         assert!(Y7Id::parse("not-a-y7-uri").is_err());
         assert!(Y7Id::parse("y7:000").is_err());
+    }
+
+    #[test]
+    fn parse_strict_rejects_non_curve_points() {
+        // Round-trip a synthetic 32-byte sequence; `parse` accepts it but
+        // `parse_strict` MUST reject if it's not on the Ed25519 curve.
+        let synthetic = Y7Id::from_pubkey([7u8; 32]).to_uri();
+        assert!(Y7Id::parse(&synthetic).is_ok());
+        assert!(
+            Y7Id::parse_strict(&synthetic).is_err(),
+            "parse_strict must reject non-curve-point inputs"
+        );
+
+        // A real Ed25519 pubkey from SigningKey passes both.
+        let sk = crate::crypto::SigningKey::generate();
+        let valid = Y7Id::from_pubkey(sk.verifying_key().to_bytes()).to_uri();
+        assert!(Y7Id::parse(&valid).is_ok());
+        assert!(Y7Id::parse_strict(&valid).is_ok());
     }
 
     #[test]

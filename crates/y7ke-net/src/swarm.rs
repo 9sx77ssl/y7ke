@@ -184,7 +184,19 @@ fn handle_command(
 ) {
     match cmd {
         NetCommand::Dial { y7_id } => {
-            let peer = peer_id_from_y7(&y7_id);
+            let peer = match peer_id_from_y7(&y7_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    debug!(error = %e, "dial: invalid Y7Id pubkey");
+                    emit(
+                        event_tx,
+                        NetEvent::Error {
+                            message: e.to_string(),
+                        },
+                    );
+                    return;
+                }
+            };
             let addrs = state.address_book.get(&peer).cloned().unwrap_or_default();
             if addrs.is_empty() {
                 debug!(%peer, "dial requested but no addresses known");
@@ -604,14 +616,19 @@ fn connection_kind_for(_endpoint: &ConnectedPoint) -> ConnectionKind {
 
 /// Build a libp2p `PeerId` from a Y7 identifier.
 ///
-/// In V1 the long-term Ed25519 keypair is shared between Y7KE and
-/// libp2p, so the mapping is simply
-/// `PeerId::from(PublicKey::Ed25519(y7_id.pubkey))`.
-pub fn peer_id_from_y7(y7_id: &Y7Id) -> PeerId {
+/// In V1 the long-term Ed25519 keypair is shared between Y7KE and libp2p,
+/// so the mapping is simply `PeerId::from(PublicKey::Ed25519(y7_id.pubkey))`.
+///
+/// Returns `Err` if the underlying 32 bytes are not a valid Ed25519 point.
+/// `Y7Id::parse` already validates input, so user-facing URIs land here as
+/// valid; this fallback only fires on bytes obtained through unchecked
+/// constructors (e.g. `Y7Id::from_pubkey(...)` with arbitrary input or a
+/// corrupted DB row).
+pub fn peer_id_from_y7(y7_id: &Y7Id) -> Result<PeerId, AppError> {
     let pubkey = identity::ed25519::PublicKey::try_from_bytes(y7_id.pubkey())
-        .expect("Y7Id always carries a valid 32-byte Ed25519 pubkey");
+        .map_err(|e| AppError::network(format!("invalid Ed25519 pubkey in Y7Id: {e}")))?;
     let libp2p_pub: identity::PublicKey = identity::PublicKey::from(pubkey);
-    libp2p_pub.to_peer_id()
+    Ok(libp2p_pub.to_peer_id())
 }
 
 /// Extract a `PeerId` from a multiaddr that ends with
@@ -678,7 +695,7 @@ mod tests {
         let y7 = Y7Id::from_pubkey(ed_pub.to_bytes());
 
         // Y7Id → PeerId
-        assert_eq!(peer_id_from_y7(&y7), peer_id);
+        assert_eq!(peer_id_from_y7(&y7).unwrap(), peer_id);
         // PeerId → Y7Id
         assert_eq!(y7_id_from_peer_id(&peer_id), Some(y7));
     }

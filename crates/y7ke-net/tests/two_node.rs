@@ -46,7 +46,7 @@ async fn run_handshake_round_trip() {
     // The Y7Id ↔ PeerId mapping must round-trip.
     let bob_y7 =
         y7ke_core::Y7Id::from_pubkey(bob_kp.public().try_into_ed25519().unwrap().to_bytes());
-    assert_eq!(peer_id_from_y7(&bob_y7), bob_peer);
+    assert_eq!(peer_id_from_y7(&bob_y7).unwrap(), bob_peer);
 
     let alice_swarm = build_swarm(alice_kp).expect("build alice swarm");
     let bob_swarm = build_swarm(bob_kp).expect("build bob swarm");

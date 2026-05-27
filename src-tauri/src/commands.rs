@@ -38,7 +38,7 @@ pub async fn send_contact_request(
     y7_id: String,
     greeting: Option<String>,
 ) -> Result<(), String> {
-    let peer = Y7Id::parse(&y7_id).map_err(err)?;
+    let peer = Y7Id::parse_strict(&y7_id).map_err(err)?;
     app.send_contact_request(peer, greeting).await.map_err(err)
 }
 
@@ -60,7 +60,7 @@ pub async fn list_messages(
     conversation_id: String,
     limit: i64,
 ) -> Result<Vec<MessageView>, String> {
-    let peer = Y7Id::parse(&conversation_id).map_err(err)?;
+    let peer = Y7Id::parse_strict(&conversation_id).map_err(err)?;
     app.list_messages(peer, limit).await.map_err(err)
 }
 
@@ -70,7 +70,7 @@ pub async fn send_message(
     to_y7_id: String,
     text: String,
 ) -> Result<String, String> {
-    let peer = Y7Id::parse(&to_y7_id).map_err(err)?;
+    let peer = Y7Id::parse_strict(&to_y7_id).map_err(err)?;
     let mid = app.send_message(peer, text).await.map_err(err)?;
     Ok(mid.to_string())
 }
