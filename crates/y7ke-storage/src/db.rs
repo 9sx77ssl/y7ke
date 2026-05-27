@@ -20,8 +20,12 @@ pub struct DbConfig {
 
 impl DbConfig {
     /// Resolve the standard per-OS app data directory and place
-    /// `y7ke.db` + `master.dek` inside it.
+    /// `y7ke.db` + `master.dek` inside it. `Y7KE_DATA_DIR` overrides the
+    /// OS-default path — useful for running multiple local instances.
     pub fn default_for_app() -> Result<Self> {
+        if let Ok(custom) = std::env::var("Y7KE_DATA_DIR") {
+            return Ok(Self::in_dir(custom));
+        }
         let proj = directories::ProjectDirs::from("com", "y7ke", "Y7KE")
             .ok_or_else(|| AppError::storage("could not resolve app data directory"))?;
         let dir = proj.data_dir();
