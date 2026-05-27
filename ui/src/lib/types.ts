@@ -75,6 +75,11 @@ export interface ContactAddedEvent {
   y7_id: string;
 }
 
+export interface ContactRemovedEvent {
+  kind: "contact_removed";
+  y7_id: string;
+}
+
 export interface MessageReceivedEvent {
   kind: "message_received";
   conversation_id: string;
@@ -106,6 +111,7 @@ export type AppEvent =
   | RequestReceivedEvent
   | RequestResolvedEvent
   | ContactAddedEvent
+  | ContactRemovedEvent
   | MessageReceivedEvent
   | MessageStatusChangedEvent
   | PresenceChangedEvent

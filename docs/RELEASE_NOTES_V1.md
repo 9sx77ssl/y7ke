@@ -25,7 +25,10 @@ central infrastructure.
   `INSERT OR IGNORE` at the receiver.
 - **Contact lifecycle.** Add by paste — accept, reject, or cancel.
   Outgoing requests can be revoked locally; incoming requests resolve as
-  accepted or rejected. Sessions persist across reboots.
+  accepted or rejected. Sessions persist across reboots. Accept,
+  reject, and delete events propagate to the peer over an in-band
+  control protocol (1-byte tag on `/y7ke/msg/1.0.0`); deletes wipe both
+  sides and auto-eject the UI from the chat pane.
 - **Offline sync.** Messages that fail live-delivery are enqueued and
   drained on the next peer reconnect; convergence verified by the
   `v1_offline_sync` test.
@@ -58,13 +61,14 @@ ui/               Svelte 5 + TypeScript + Vite + custom design system
 
 ## Tests
 
-48 active + 2 ignored across the workspace. Highlights:
+51 active + 2 ignored across the workspace. Highlights:
 
 | Test | Duration | What it proves |
 |---|---|---|
 | `v1_e2e` | ~3 s | 7 V1 capabilities end-to-end with 2 clients |
 | `v1_offline_sync` | ~6 s | Sender enqueues while peer offline; recipient reboots; all messages arrive in order |
 | `v1_restart_both` | ~9 s | Both peers shutdown + reboot; history persists; new messages flow |
+| `v1_delete_propagation` | ~3 s | Bob deletes → Alice receives `ContactRemoved`, both DBs wiped |
 | `v1_stress` (#[ignore]) | ~10 s | 3 clients × 5 msgs/direction = 30 messages, no losses, no duplicates |
 
 Audit closed **C1 + H1 + H2 + H3 + H4 + M1 + M2 + M3 + M4 + L1** (see

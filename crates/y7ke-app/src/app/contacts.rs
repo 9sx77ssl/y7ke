@@ -150,9 +150,8 @@ impl AppHandle {
         self.send_control(&peer, messaging::ControlPayload::ChatDeleted)
             .await;
         crate::event_loop::wipe_conversation(&self.inner, &peer).await?;
-        let _ = self.event_tx.send(AppEvent::RequestResolved {
+        let _ = self.event_tx.send(AppEvent::ContactRemoved {
             y7_id: peer.to_uri(),
-            resolution: RequestResolution::Cancelled,
         });
         Ok(())
     }

@@ -29,6 +29,11 @@ pub enum AppEvent {
     /// A new accepted contact landed in the address book.
     ContactAdded { y7_id: String },
 
+    /// A contact (and any related chat state) was wiped — either by the
+    /// local user or remotely via a ChatDeleted control. UI should refresh
+    /// the contacts list and exit any chat with this peer.
+    ContactRemoved { y7_id: String },
+
     /// A new message was persisted locally (either inbound or outbound).
     MessageReceived {
         conversation_id: String,
@@ -61,6 +66,7 @@ impl AppEvent {
             AppEvent::RequestReceived { .. } => "request_received",
             AppEvent::RequestResolved { .. } => "request_resolved",
             AppEvent::ContactAdded { .. } => "contact_added",
+            AppEvent::ContactRemoved { .. } => "contact_removed",
             AppEvent::MessageReceived { .. } => "message_received",
             AppEvent::MessageStatusChanged { .. } => "message_status_changed",
             AppEvent::PresenceChanged { .. } => "presence_changed",

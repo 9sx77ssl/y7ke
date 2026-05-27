@@ -600,11 +600,7 @@ async fn handle_control(
         messaging::ControlPayload::ChatDeleted => {
             // Peer wiped the conversation; mirror locally and tell UI to refresh.
             wipe_conversation(inner, &sender).await?;
-            let _ = event_tx.send(AppEvent::RequestResolved {
-                y7_id: sender.to_uri(),
-                resolution: y7ke_core::RequestResolution::Cancelled,
-            });
-            let _ = event_tx.send(AppEvent::ContactAdded {
+            let _ = event_tx.send(AppEvent::ContactRemoved {
                 y7_id: sender.to_uri(),
             });
         }

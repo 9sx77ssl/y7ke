@@ -13,6 +13,9 @@ Tick once verified, with the commit / log / test name that proves it.
 - [x] **C3 — Accept / reject / cancel request.** Local state transitions
       + events. Verified by `v1_e2e` (accept), `v1_restart_both`
       (regression for H1 + H3), and `cancel_request` API exposed.
+      Accept propagation: `ControlPayload::AcceptedRequest` sent over
+      `/y7ke/msg/1.0.0` so the initiator promotes without waiting for
+      the first inbound text.
 - [x] **C4 — Open chat.** `list_messages(peer, limit)` returns ordered
       history. Verified by `v1_e2e`.
 - [x] **C5 — Encrypted messaging.** ChaCha20-Poly1305(session_key) over
@@ -22,6 +25,11 @@ Tick once verified, with the commit / log / test name that proves it.
       messages. Verified by `storage_e2e` + `v1_restart_both`.
 - [x] **C7 — Offline sync.** Queue drains on reconnect; no duplicates.
       Verified by `v1_offline_sync`.
+- [x] **C8 — Delete propagation & auto-eject** (added post-audit).
+      `delete_contact` sends `ControlPayload::ChatDeleted`; the peer
+      wipes its conversation and emits `AppEvent::ContactRemoved`; the
+      UI exits the chat pane if the deleted peer was open. Verified by
+      `v1_delete_propagation`.
 
 ## Code quality
 

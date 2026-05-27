@@ -9,7 +9,10 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { onAppEvent } from "../bridge";
 import type { AppEvent } from "../types";
 
-import { applyContactAdded } from "./contacts.svelte";
+import {
+  applyContactAdded,
+  applyContactRemoved,
+} from "./contacts.svelte";
 import { applyIdentityReady } from "./identity.svelte";
 import {
   applyMessageReceived,
@@ -20,6 +23,7 @@ import {
   applyRequestReceived,
   applyRequestResolved,
 } from "./requests.svelte";
+import { openEmpty, router } from "./route.svelte";
 
 interface EventState {
   started: boolean;
@@ -84,6 +88,13 @@ function dispatch(ev: AppEvent): void {
       break;
     case "contact_added":
       applyContactAdded(ev.y7_id);
+      break;
+    case "contact_removed":
+      applyContactRemoved(ev.y7_id);
+      // Eject from chat if it was with the removed peer.
+      if (router.pane.kind === "chat" && router.pane.peerY7Id === ev.y7_id) {
+        openEmpty();
+      }
       break;
     case "message_received":
       applyMessageReceived({

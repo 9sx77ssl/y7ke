@@ -74,6 +74,11 @@ export function applyContactAdded(_y7Id: string): void {
   void refreshContacts();
 }
 
+/** Event dispatch — contact_removed. Refresh + eject from chat if open. */
+export function applyContactRemoved(_y7Id: string): void {
+  void refreshContacts();
+}
+
 export function findContact(y7Id: string): ContactView | undefined {
   return state.items.find((c) => c.y7_id === y7Id);
 }
