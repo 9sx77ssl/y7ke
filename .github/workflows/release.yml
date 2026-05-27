@@ -76,8 +76,10 @@ jobs:
         working-directory: ui
         run: pnpm install --frozen-lockfile
 
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
+      - name: Install tauri-cli (prebuilt)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@^2
 
       - name: Build (Tauri)
         run: cargo tauri build --target ${{ matrix.target }}
@@ -113,14 +115,21 @@ jobs:
           \) -exec cp {} release/ \;
           ls -la release/
 
-      - name: Extract release notes for this tag
+      - name: Extract CHANGELOG section for this tag
         id: notes
         run: |
-          if [ -f docs/RELEASE_NOTES_V1.md ]; then
-            echo "body_path=docs/RELEASE_NOTES_V1.md" >> "$GITHUB_OUTPUT"
-          else
-            echo "body_path=" >> "$GITHUB_OUTPUT"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$tag" '
+              $0 ~ "^## \\[" ver "\\]" { capture=1; print; next }
+              capture && /^## \[/ { exit }
+              capture { print }
+            ' CHANGELOG.md > release/NOTES.md
           fi
+          if [ ! -s release/NOTES.md ]; then
+            echo "_(no CHANGELOG entry for ${GITHUB_REF_NAME})_" > release/NOTES.md
+          fi
+          echo "body_path=release/NOTES.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

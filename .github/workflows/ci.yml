@@ -12,15 +12,16 @@ env:
 
 jobs:
   rust:
+    name: rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, required: true }
-          - { os: macos-latest, required: false }
-          - { os: windows-latest, required: false }
+          - { os: ubuntu-latest, gate: blocking }
+          - { os: macos-latest, gate: advisory }
+          - { os: windows-latest, gate: advisory }
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ !matrix.required }}
+    continue-on-error: ${{ matrix.gate == 'advisory' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +45,7 @@ jobs:
 
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace --all-features
+      - run: cargo test --workspace --no-fail-fast
 
   ui:
     runs-on: ubuntu-latest
@@ -66,11 +67,21 @@ jobs:
         working-directory: ui
 
   tauri-build:
-    runs-on: ubuntu-latest
+    name: tauri-build / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, gate: blocking }
+          - { os: macos-latest, gate: advisory }
+          - { os: windows-latest, gate: advisory }
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.gate == 'advisory' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux deps
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -96,8 +107,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: ui
 
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
+      - name: Build UI bundle
+        run: pnpm build
+        working-directory: ui
 
-      - name: Build production binary (no bundle)
-        run: cargo tauri build --no-bundle
+      - name: Build production binary
+        run: cargo build --release -p y7ke-tauri

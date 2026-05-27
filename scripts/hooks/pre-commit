@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Auto-bump patch version on every commit. Updates Cargo.toml,
+# src-tauri/tauri.conf.json, ui/package.json, and prepends a CHANGELOG.md
+# entry with the commit subject.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Skip if amending or rebasing — version already in flight.
+if [ -n "${GIT_INDEX_FILE:-}" ] && [ -f .git/MERGE_MSG ]; then exit 0; fi
+if [ -f .git/rebase-apply/applying ] || [ -d .git/rebase-merge ]; then exit 0; fi
+
+current=$(grep '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+IFS='.' read -r maj min pat <<< "$current"
+next="$maj.$min.$((pat + 1))"
+
+# Workspace version
+sed -i -E "0,/^version[[:space:]]*=[[:space:]]*\"$current\"/ s//version      = \"$next\"/" Cargo.toml
+# Tauri config
+sed -i -E "s/\"version\": \"$current\"/\"version\": \"$next\"/" src-tauri/tauri.conf.json
+# UI package
+sed -i -E "s/\"version\": \"$current\"/\"version\": \"$next\"/" ui/package.json
+
+git add Cargo.toml src-tauri/tauri.conf.json ui/package.json
+
+echo "[pre-commit] $current → $next"

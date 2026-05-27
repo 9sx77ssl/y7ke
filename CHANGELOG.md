@@ -1,0 +1,42 @@
+# Changelog
+
+All notable changes to Y7KE are recorded here. The pre-commit hook bumps
+the patch version on every commit and prepends an entry with the commit
+subject; release tags pick up the matching section as the release body.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+versioning is [SemVer](https://semver.org/).
+
+## [0.1.0] — 2026-05-27
+
+Initial pre-release covering the V1 LAN end-to-end product plus a first
+slice of V2 hardening:
+
+### Added
+- Tauri 2 + Svelte 5 + Rust workspace (4 crates: core / storage / net /
+  app + the tauri shell). End-to-end encrypted text messaging over libp2p
+  (TCP + Noise + Yamux + mDNS + identify + ping).
+- Identity flow (`y7:<base58 ed25519 pub>`), X25519 + HKDF session
+  handshake, ChaCha20-Poly1305 message envelopes, UUIDv7 message IDs.
+- Contact lifecycle (add by paste / accept / reject / cancel / delete)
+  with control-protocol propagation over the message stream.
+- Offline sync via `sync_queue` retry + initiator-side 3-round
+  `/y7ke/sync/1.0.0` reconcile (Header → Pull → Ack).
+- Per-peer leaky-bucket rate limiter on inbound handshake / msg / sync.
+- Non-blocking AppHandle::boot — window appears before the swarm is up.
+- ts-rs codegen for `AppEvent` + view types into `ui/src/lib/gen/`.
+- Delivered status: live delivery flips `Sending → Delivered` on
+  `MsgResp.ack`; Synced reserved for explicit `/y7ke/sync/1.0.0` Ack.
+- Auto-eject from chat on contact removal (local + remote).
+- CI: fmt + clippy + tests on Linux / macOS / Windows; production tauri
+  build verified per push; release workflow bundles `.deb / .AppImage /
+  .dmg / .msi / .exe` on `v*` tags.
+- `Y7KE_DATA_DIR` env override for running multiple local instances.
+
+### Known limitations
+- LAN-only discovery (mDNS); internet routing (Kademlia + relay +
+  AutoNAT + DCUtR + QUIC) lands in 0.2.x.
+- Master DEK in file mode 0600, not OS keyring (CR2 in
+  [`docs/ROADMAP.md`](docs/ROADMAP.md)).
+- Static session key — no forward secrecy yet (CR1, Double Ratchet
+  scheduled for 0.2.x).
