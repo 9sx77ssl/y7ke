@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.21] — 2026-05-27
+
+- fix(net): clippy type_complexity + collapsible_match; pin bootstrap1.y7v.lol
+
 ## [0.1.20] — 2026-05-27
 
 - feat(net): V2-A1+A2 internet-mode discovery via Kademlia + bootstrap

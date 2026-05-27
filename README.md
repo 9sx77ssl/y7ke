@@ -120,8 +120,17 @@ bootstrap node. Discovery chain on `dial_with_discovery`:
 
 Bootstraps are sourced in this order, first non-empty wins:
 
-1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs)
-2. `~/.config/y7ke/bootstrap.toml`:
+1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs, all
+   platforms).
+2. `bootstrap.toml` in the per-OS config directory:
+
+   | OS | Path |
+   |---|---|
+   | Linux | `$XDG_CONFIG_HOME/y7ke/bootstrap.toml` (defaults to `~/.config/y7ke/bootstrap.toml`) |
+   | macOS | `~/Library/Application Support/com.y7ke.Y7KE/bootstrap.toml` |
+   | Windows | `%APPDATA%\y7ke\Y7KE\config\bootstrap.toml` (typically `C:\Users\<you>\AppData\Roaming\y7ke\Y7KE\config\bootstrap.toml`) |
+
+   File format:
    ```toml
    peers = [
      "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…",
