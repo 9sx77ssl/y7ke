@@ -45,6 +45,11 @@
     if (e.key === "Escape") close();
     if (e.key === "Enter") confirm();
   }
+
+  function focusOnMount(node: HTMLElement) {
+    // Defer until rise animation has positioned the modal.
+    requestAnimationFrame(() => node.focus());
+  }
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -59,6 +64,7 @@
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
       tabindex="-1"
+      use:focusOnMount
     >
       <header class="head">
         <h2 id="modal-title">{title}</h2>
