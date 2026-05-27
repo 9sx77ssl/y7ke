@@ -4,12 +4,14 @@
 //! to keep TypeScript ergonomics simple.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::id::ConversationId;
 use crate::status::{ConnectionKind, MessageStatus, RequestResolution};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum AppEvent {
     /// First-launch identity finished generating / loaded on subsequent boots.
     IdentityReady { y7_id: String },
@@ -39,6 +41,7 @@ pub enum AppEvent {
         conversation_id: String,
         message_id: String,
         sender_y7_id: String,
+        #[ts(type = "number")]
         timestamp_ms: i64,
         text: String,
     },
@@ -46,6 +49,7 @@ pub enum AppEvent {
     /// A previously persisted message changed status (e.g., Sent → Synced).
     MessageStatusChanged {
         message_id: String,
+        #[ts(type = "number")]
         status: MessageStatus,
     },
 

@@ -1,11 +1,15 @@
 //! Status enums shared across modules and the IPC surface.
 
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use ts_rs::TS;
 
 /// Lifecycle of a message in the local outbox.
 ///
-/// Stored in `messages.status` as the `i64` discriminant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Stored in `messages.status` as the `i64` discriminant. Wire format is
+/// also the i64 discriminant (via serde_repr) so the UI consumes it as a
+/// number, matching the `MSG_SENDING / MSG_SENT / …` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
 #[repr(i64)]
 pub enum MessageStatus {
     /// Encrypted, persisted locally, queued for first send.
@@ -38,8 +42,9 @@ impl MessageStatus {
 }
 
 /// How a peer is currently reachable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum ConnectionKind {
     Offline,
     Connecting,
@@ -52,8 +57,9 @@ pub enum ConnectionKind {
 }
 
 /// State of a pending contact request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum RequestResolution {
     Accepted,
     Rejected,
@@ -61,8 +67,9 @@ pub enum RequestResolution {
 }
 
 /// State of a contact in the local address book.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum ContactStatus {
     Accepted,
     PendingOut,

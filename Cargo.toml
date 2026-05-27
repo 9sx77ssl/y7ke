@@ -38,6 +38,8 @@ uuid               = { version = "1", features = ["v7", "serde"] }
 blake3             = "1"
 zeroize            = { version = "1", features = ["zeroize_derive"] }
 bs58               = "0.5"
+ts-rs              = "12"
+serde_repr         = "0.1"
 
 # Crypto primitives (used by y7ke-core).
 ed25519-dalek    = "2"
