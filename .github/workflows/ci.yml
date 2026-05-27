@@ -2,9 +2,9 @@ name: CI
 
 # Trim policy:
 #   - Linux is the canonical dev target → all checks always run there.
-#   - macOS / Windows builds only run on tag pushes (release prep) and
-#     pull requests (so contributors get cross-platform feedback). They
-#     don't gate every main commit — that wasted ~10 min per push.
+#   - Windows build sanity only runs on tag pushes (release prep) and
+#     pull requests. macOS is dropped — contributors can build it
+#     themselves if they need it.
 #   - Tauri-build is folded into the rust job on Linux to save a checkout.
 
 on:
@@ -77,15 +77,11 @@ jobs:
       - name: Build release binary
         run: cargo build --release -p y7ke-tauri --features custom-protocol
 
-  cross-platform:
-    name: cross-platform / ${{ matrix.os }}
+  windows:
+    name: windows / build sanity
     # Only on tags + PRs — not every main push.
     if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
