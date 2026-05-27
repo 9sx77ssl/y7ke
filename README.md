@@ -4,7 +4,7 @@ Privacy-first, key-based, peer-to-peer desktop messenger.
 
 - **No accounts, no email, no phone numbers.** Your identity is a public key.
 - **No central server.** Peers discover each other directly and exchange messages over libp2p.
-- **End-to-end encrypted.** ChaCha20-Poly1305 per-conversation keys derived on demand from X25519(my_static_identity_scalar, peer_pubkey); Ed25519 signatures over every envelope. **No session key is ever stored** — stealing the SQLite file without the master DEK yields ciphertext only.
+- **End-to-end encrypted.** ChaCha20-Poly1305 per-conversation keys derived on demand from X25519(my_static_identity_scalar, peer_pubkey); Ed25519 signatures over every envelope. **No session key is ever stored** — stealing the SQLite file without the master DEK yields ciphertext only. Traffic stays end-to-end even when forwarded through a bootstrap relay (Circuit Relay v2).
 - **Secure delete.** `PRAGMA secure_delete = ON` zero-fills freed pages so wiped messages and sessions don't linger on disk. Delete-contact propagates bilaterally — both copies vanish when the peer is next online.
 - **Local-first.** Messages persist in an encrypted SQLite database on disk.
 - **Offline-tolerant.** Undelivered messages queue locally and drain on reconnect; an explicit `/y7ke/sync/1.0.0` reconcile catches anything the queue lost.
@@ -107,22 +107,37 @@ and locally.
 - `PRAGMA secure_delete = ON` overwrites freed pages with zeros, so a wiped message or session can't be carved out of the database file.
 - Every envelope is signed with the sender's long-term Ed25519 key so receivers detect tampering and impersonation.
 
-## Internet mode (V2-A1+A2)
+## Internet mode (V2-A1 + A2 + A4)
 
-V1 was LAN-only via mDNS. From v0.1.20, the client also speaks Kademlia
-DHT and reaches peers across the open internet through a stable
-bootstrap node. Discovery chain on `dial_with_discovery`:
+V1 was LAN-only via mDNS. From v0.1.20 the client also speaks
+Kademlia DHT for peer lookup; from v0.1.43 it carries a libp2p
+**Circuit Relay v2** client so two peers behind NAT/CGNAT can talk
+through a public bootstrap. Discovery chain on `dial_with_discovery`,
+each step gated by the user's current dial modes:
 
 1. swarm address book (mDNS + identify cache)
-2. `peer_state.last_addrs` (persisted across restarts)
-3. `find_peer` via Kad against the configured bootstraps
-4. Direct TCP dial
+2. `peer_state.last_addrs` (persisted across restarts, filtered by
+   active modes)
+3. `find_peer` via Kad against the configured bootstraps; results
+   include relay multiaddrs of the form
+   `/dns4/<bootstrap>/.../p2p-circuit/p2p/<peer>` once the peer has
+   reserved a slot
+4. Direct TCP dial of every returned multiaddr, in order
+
+Each client proactively reserves a `/p2p-circuit` slot at every
+configured bootstrap on connect. The bootstrap forwards encrypted
+frames only — it never sees plaintext (Noise + ChaCha20-Poly1305
+wrap every byte before it leaves the client). A 15-second reconnect
+tick redials any bootstrap that drops, so a single VPS restart
+recovers in ~10 s instead of waiting for Kad's 5-minute periodic
+bootstrap.
 
 Bootstraps are sourced in this order, first non-empty wins:
 
-1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs, all
-   platforms).
-2. `bootstrap.toml` in the per-OS config directory:
+1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs).
+2. **User settings** — `Settings::extra_bootstraps` from the
+   encrypted SQLite. Set via the in-app **settings :3** page.
+3. `bootstrap.toml` in the per-OS config directory:
 
    | OS | Path |
    |---|---|
@@ -136,28 +151,76 @@ Bootstraps are sourced in this order, first non-empty wins:
      "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…",
    ]
    ```
-3. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded at build time. Current
-   default ships one node: `bootstrap1.y7v.lol` (Germany), PeerId
-   `12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`. Falls back
-   to raw IP `/ip4/89.35.130.67/tcp/4101/…` if the DNS record isn't
-   pointing yet.
+4. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded fallback at build
+   time, currently `bootstrap1.y7v.lol` (Germany), PeerId
+   `12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`. Raw-IP
+   fallback `/ip4/89.35.130.67/tcp/4101/…` if DNS isn't resolving.
 
-Want to run your own bootstrap? The standalone daemon lives in a
-separate repo: <https://github.com/9sx77ssl/y7ke-bootstrap>.
+Whatever source contributes them, the hardcoded
+`DEFAULT_RELAY_BOOTSTRAP` is **always prepended** (deduped) so a
+typo in user config can never strand the client.
+
+### Running your own bootstrap
+
+The standalone daemon lives at <https://github.com/9sx77ssl/y7ke-bootstrap>.
 One-line installer:
 
 ```bash
 bash <(curl -sSL https://github.com/9sx77ssl/y7ke-bootstrap/raw/main/install.sh)
 ```
 
-It downloads the latest release binary, installs a systemd unit at
-`/etc/systemd/system/y7ke-bootstrap.service`, opens TCP 4101 if a
-firewall is already running (skips if none), and prints the generated
-PeerId for you to publish.
+The daemon runs Kad + identify + ping + relay-server. v0.1.4+ requires
+its public-facing multiaddrs declared via `--external-addr` or the
+`Y7KE_BOOTSTRAP_EXTERNAL_ADDR` env (comma-separated). Without it,
+libp2p sends reservation acks with an empty address list and clients
+reject with `NoAddressesInReservation`.
 
-What V2-A still doesn't ship: NAT hole-punching (DCUtR), circuit relay,
-QUIC. Peers behind symmetric NAT fail their direct dial gracefully and
-stay discoverable in the DHT.
+Example systemd drop-in:
+```ini
+# /etc/systemd/system/y7ke-bootstrap.service.d/external.conf
+[Service]
+Environment=Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/your-host.example/tcp/4101
+```
+
+The relay carries ciphertext frames only — operator gets no
+metadata beyond `relay: reservation accepted` and `circuit accepted`
+log lines.
+
+## Settings — connection modes + bootstrap roster
+
+From v0.1.43, click **settings :3** in the sidebar to open the
+settings pane.
+
+- **Connection modes** — four toggle chips (`lan` / `internet` /
+  `relay` / `p2p`). `lan` uses mDNS for same-WiFi peers; `internet`
+  enables direct TCP dial via Kad-resolved addresses; `relay`
+  enables forwarding through bootstrap relays (covers NAT/CGNAT);
+  `p2p` is a placeholder for V2-A5 DCUtR hole-punching (no
+  transport effect yet). The "active strategy" hint below the
+  chips summarises the chosen combination (`auto`, `lan only`,
+  `relay-only`, `lan + relay`, etc.).
+- **Bootstrap nodes** — the locked first row is the hardcoded
+  default. Below it, user-added multiaddrs (one per row,
+  `+ add bootstrap` to add a blank row). `ping all` opens a TCP
+  connection to each (5 s budget) and shows the latency in a
+  pill — green ≤150 ms, amber otherwise, red on failure. `save`
+  persists to the encrypted SQLite and re-syncs the live swarm
+  without a restart.
+
+Changes propagate immediately: `update_settings` fires an
+`AppEvent::SettingsChanged` and `NetCommand::UpdateBootstraps`,
+the swarm task adds any new entries to its `bootstrap_peers` map
+and dials them. Existing connections to removed bootstraps stay
+open until they drop naturally.
+
+## Still pending in V2-A
+
+NAT hole-punching (A5 DCUtR — upgrading the relayed connection to a
+direct TCP/UDP one once both peers reveal their observed addresses),
+AutoNAT v2 (A3 — telling the user "you're publicly reachable" vs
+"you need the relay"), and QUIC transport (A6 — UDP-only networks).
+With A4 shipped, two peers across arbitrary NATs already talk; A5
+makes the connection direct when the NATs allow it.
 
 ## Documentation
 

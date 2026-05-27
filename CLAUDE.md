@@ -14,8 +14,8 @@ messaging over libp2p; local-first SQLite; no accounts. See
 
 ```
 crates/y7ke-core       # types, errors, crypto primitives, AppEvent, status enums
-crates/y7ke-storage    # sqlx-sqlite + master DEK + DAOs (8 tables)
-crates/y7ke-net        # libp2p swarm + 3 request-response protocols
+crates/y7ke-storage    # sqlx-sqlite + master DEK + DAOs (9 tables incl. settings)
+crates/y7ke-net        # libp2p swarm + 3 request-response protocols + Kad + relay-client
 crates/y7ke-app        # composition root — owns Db + NetHandle, runs event_loop
 src-tauri              # Tauri 2 shell, command surface, event channel
 ui                     # Svelte 5 + Vite + TypeScript
@@ -101,11 +101,51 @@ cd ui && pnpm tsc --noEmit
   until the slot is filled.
 - **Rate limiter** lives in `crates/y7ke-app/src/rate_limit.rs`. Inbound
   RPCs gate through `inner.rate_limiter.allow_*` before any DB work.
+- **`NetCommand::Dial` returns Ok(true)/Ok(false)/Err** via a oneshot;
+  `Ok(true)` means a dial was actually issued, `Ok(false)` means the
+  swarm has no addresses for the peer (so callers must fall through
+  to discovery). The discovery chain in `app/contacts.rs` relies on
+  this — don't switch it back to fire-and-forget without rewriting
+  `dial_with_discovery`.
+- **`DEFAULT_RELAY_BOOTSTRAP`** lives in `y7ke_core::settings`. It's
+  always prepended (deduped) to whatever else `load_bootstraps`
+  resolves so the UI's Settings page can't strand the client by
+  deleting all entries. UI renders it `readonly` with `is_default=true`
+  and no delete button.
+- **`pnpm-workspace.yaml`** in `ui/` carries `onlyBuiltDependencies:
+  - esbuild`. pnpm 10 ignores the equivalent `pnpm` field in
+  package.json; the workspace yaml is the only path that lets a
+  fresh checkout `pnpm install` without manual `approve-builds`.
+- **Bootstrap auto-redial.** A 15-s tick in the swarm task redials
+  any configured bootstrap not currently connected; `ConnectionClosed`
+  on a bootstrap clears `state.relay_reserved` so the redial re-runs
+  `listen_on(/p2p-circuit)`. Don't introduce a faster spin loop —
+  it'll hammer the VPS during legitimate outages.
+
+## V2-A4 notes (circuit relay + Settings)
+
+- **Bootstrap external addresses** must be declared via
+  `--external-addr` / `Y7KE_BOOTSTRAP_EXTERNAL_ADDR` on the
+  `y7ke-bootstrap` daemon (v0.1.4+). Without them, libp2p's relay
+  server sends reservation acks with an empty addrs list and the
+  client transport errors with `NoAddressesInReservation`. The VPS
+  systemd drop-in at
+  `/etc/systemd/system/y7ke-bootstrap.service.d/external-addr.conf`
+  sets `Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/bootstrap1.y7v.lol/tcp/4101,/ip4/89.35.130.67/tcp/4101`.
+- **`AppEvent::SettingsChanged`** fires when the user saves. The UI's
+  events dispatcher subscribes and refreshes its store; the swarm
+  task receives a `NetCommand::UpdateBootstraps` to re-sync its
+  `bootstrap_peers` map.
+- **Idempotent `send_contact_request`** dedups by querying
+  `requests().list_pending(Some(Outgoing))` and skipping insert
+  when a row for the same peer already exists. Migration
+  `0003_dedup_outgoing_requests.sql` collapses any duplicates
+  accumulated before the fix.
 
 ## Roadmap pointers
 
-Track ordering (locked by the user): finish **C** (sync correctness +
-non-blocking boot polish), then **D** (tooling — ts-rs ✅, CI builds ✅,
-UI polish), then **B** (Double Ratchet, OS keyring, handshake replay
-nonce), then **A** (Kademlia + bootstrap relays + DCUtR + QUIC).
-Don't start internet routing until B is solid.
+A1 + A2 + A4 shipped. Settings UI shipped. Remaining: **A3** (AutoNAT
+v2 — reachability detection), **A5** (DCUtR — upgrade Relayed →
+Direct), **A6** (QUIC). Then **B** (Double Ratchet + OS keyring +
+handshake replay nonce). **D2** (Playwright E2E) can run in parallel
+once types stabilise.

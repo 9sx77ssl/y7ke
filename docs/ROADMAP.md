@@ -4,10 +4,10 @@
 
 ```
 V1 LAN messenger          ✓ shipped (2026-05-27, v0.1.18)
-V2 Track A — Internet     ◐ A1+A2 shipped (v0.1.20), A3-A6 pending
+V2 Track A — Internet     ◐ A1+A2+A4 shipped (v0.1.43), A3+A5+A6 pending
 V2 Track B — Crypto uplift ◯ not started
 V2 Track C — Sync polish   ✓ shipped (C1-C4 all in main)
-V2 Track D — Tooling       ◐ D1 done, D2 pending
+V2 Track D — Tooling       ◐ D1 done, runtime Settings + dial-mode UI shipped (v0.1.43), D2 pending
 V3 Groups / files / Tor    ◯ not started
 ```
 
@@ -88,13 +88,53 @@ secrecy, OS keychain, group chats, file transfer.
 3. **A3 — AutoNAT v2.** Detect public reachability, cache result,
    surface as a status pill in the UI (`public` / `private` /
    `unknown`).
-4. **A4 — Circuit relay v2.** Client + (on bootstrap nodes) server.
-   When direct dial fails, retry via relay.
+4. **A4 — Circuit relay v2.** ✓ Shipped (v0.1.43). Client carries
+   `libp2p::relay::client::Behaviour`; bootstrap (separate repo,
+   `y7ke-bootstrap` v0.1.4) carries `libp2p::relay::Behaviour` as
+   server. Each client proactively reserves a `/p2p-circuit` slot at
+   every configured bootstrap on `ConnectionEstablished` and a 15-s
+   reconnect tick redials any bootstrap that drops, clearing
+   `relay_reserved` so the next reconnect re-runs `listen_on`. The
+   bootstrap's external addresses are declared via
+   `--external-addr` / `Y7KE_BOOTSTRAP_EXTERNAL_ADDR` so the
+   reservation acknowledgement carries dialable addrs (without this
+   libp2p errors out with `NoAddressesInReservation`). The relay only
+   shuffles ciphertext frames — Noise + ChaCha20-Poly1305 wrap every
+   byte before it leaves the client. Connection kind reported via
+   `ConnectedPoint::is_relayed()` →
+   `ConnectionKind::Relayed`; UI shows a `RELAY` label in a muted
+   lilac next to the peer nickname.
 5. **A5 — DCUtR hole-punching.** Upgrade relay-routed connections to
    direct in `ConnectionEstablished`. Add
    `ConnectionKind::DirectAfterHolepunch` so the UI shows the upgrade.
 6. **A6 — QUIC transport.** `libp2p-quic` for UDP-only networks; keep
    TCP+Noise+Yamux as fallback.
+
+#### Runtime Settings UI (shipped v0.1.43, lands alongside A4)
+
+User-controllable connection policy and bootstrap roster. Stored in
+the encrypted SQLite (`settings` single-row table, migration
+`0004_settings.sql`). Surfaces in the UI via the
+`settings :3` Sidebar nav item.
+
+- **Dial modes** (LAN / Internet / Relay / P2P). Each step of
+  `dial_with_discovery` reads `Settings::dial_modes` and filters the
+  multiaddrs it tries. `P2P` is a UI-visible stub for A5 — toggling
+  it has no transport effect yet but the Settings page already
+  shows the future "p2p preferred, relay fallback" strategy strings.
+- **Bootstrap roster.** The hardcoded `DEFAULT_RELAY_BOOTSTRAP`
+  (`bootstrap1.y7v.lol`) is always returned first by
+  `list_bootstraps` with `is_default=true` and is rendered locked
+  in the UI (input is `readonly`, no delete `×`). Extras live in
+  `Settings::extra_bootstraps` and are user-editable.
+- **TCP-connect pings.** `ping_all_bootstraps` opens raw TCP with a
+  5-s timeout per multiaddr (DNS-resolve `/dns4` → `/ip4`),
+  parallel via `tokio::join_all`. Results cached in
+  `AppInner::bootstrap_pings`.
+- **Live re-sync.** `update_settings` emits
+  `AppEvent::SettingsChanged` and dispatches `NetCommand::UpdateBootstraps`
+  to the swarm task, which re-syncs its `bootstrap_peers` map and
+  dials any new entries without restart.
 
 ### Track B — Crypto + secret-storage uplift ◯
 
@@ -125,15 +165,15 @@ secrecy, OS keychain, group chats, file transfer.
 - **C3 ✓** Per-peer leaky-bucket rate limiter.
 - **C4 ✓** Non-blocking `AppHandle::boot`.
 
-### Suggested V2 sequencing (4–6 weeks)
+### Suggested V2 sequencing (3–5 weeks remaining)
 
 ```
-weeks 1–2:  A1 + A2     Kad + bootstrap relays
-weeks 2–3:  A3 + A4     AutoNAT + circuit relay
-weeks 3–4:  A5 + A6     DCUtR + QUIC
-weeks 1–3:  B1, B3      in parallel with A — small, isolated
-weeks 4–6:  B2          Double Ratchet — biggest single piece
-weeks 5–6:  D2          Playwright E2E after types stabilise
+✓ done:      A1 + A2 + A4 + Settings UI + runtime dial modes
+weeks 1–2:   A3 + A5     AutoNAT + DCUtR (relay → direct upgrade)
+weeks 2–3:   A6          QUIC transport (UDP-friendly networks)
+weeks 1–2:   B1, B3      OS keyring + handshake replay nonce — isolated
+weeks 3–5:   B2          Double Ratchet (biggest single piece)
+weeks 4–5:   D2          Playwright E2E after types stabilise
 ```
 
 V2 ships when:

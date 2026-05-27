@@ -12,7 +12,9 @@ V1 ships seven user-visible capabilities working end-to-end on a LAN:
 6. **SQLite persistence** — survives app restart with ciphertext on disk.
 7. **Offline sync after reconnect** — undelivered messages drain through `/y7ke/sync/1.0.0` reconcile protocol when peers meet again.
 
-Discovery is **mDNS-only** — Y7KE V1 is a LAN messenger. NAT traversal, DHT bootstrap, and internet routing land in V2.
+Discovery is **mDNS-only** — Y7KE V1 is a LAN messenger. NAT
+traversal (DHT bootstrap, circuit relay) lands incrementally in V2.
+See the "V2 additions" section below for what shipped on top.
 
 ## Crate layout
 
@@ -39,18 +41,65 @@ ui           ─── @tauri-apps/api only
 
 All edges one-way. Adding a crate beyond these four is V2-only.
 
-## Networking (V1)
+## Networking
 
-Single `#[derive(NetworkBehaviour)]` aggregating:
+Single `#[derive(NetworkBehaviour)]` (`Y7Behaviour`) aggregating:
 
 - `identify::Behaviour` (`/y7ke/0.1.0`)
 - `ping::Behaviour` for liveness / RTT
-- `mdns::tokio::Behaviour` — sole discovery mechanism in V1
+- `mdns::tokio::Behaviour` — LAN discovery
 - `request_response::cbor::Behaviour<HandshakeReq, HandshakeResp>` — `/y7ke/handshake/1.0.0`
 - `request_response::cbor::Behaviour<MsgReq, MsgResp>` — `/y7ke/msg/1.0.0`
 - `request_response::cbor::Behaviour<SyncReq, SyncResp>` — `/y7ke/sync/1.0.0`
+- `kad::Behaviour<MemoryStore>` (V2-A1) — `/y7ke/kad/1.0.0`, server mode, each client `start_providing`s its own key
+- `relay::client::Behaviour` (V2-A4) — circuit-relay-v2 client; the bootstrap (separate `y7ke-bootstrap` repo) carries `relay::Behaviour` as server
 
-Transports: TCP + Noise (XX) + Yamux. No QUIC in V1.
+Transports: TCP + Noise (XX) + Yamux, with `with_relay_client(...)` adding a separate transport for `/p2p-circuit` dials. No QUIC yet (V2-A6).
+
+### Discovery + dialing
+
+`crates/y7ke-app/src/app/contacts.rs::dial_with_discovery` runs four
+steps in order, each gated by the user's current `DialModes`:
+
+1. **Swarm address book** — `net.dial(peer)` looks up the in-memory
+   cache populated by mDNS + identify. Returns `Ok(true)` if a dial
+   was actually issued, `Ok(false)` if the cache is empty (so the
+   chain continues). If `lan` mode is off and every known addr is
+   LAN-only, skips this step.
+2. **Cached addrs** — `peer_state.last_addrs_json` (filtered by
+   active modes), persisted across restarts.
+3. **Kad lookup** — `find_peer(y7_id)` issues `get_providers` with
+   a 10-s timeout; results filtered to drop non-circuit non-LAN
+   when `internet` is off, or drop circuit-bearing ones when
+   `relay` is off.
+4. **Last-resort re-dial** — by now Kad may have populated the
+   routing table.
+
+`connection_kind_for(endpoint)` classifies the new connection using
+`ConnectedPoint::is_relayed()` →
+`ConnectionKind::{Lan, Internet, Relayed, Direct}`. The UI's
+`StatusDot` shows online/offline; a small `RELAY` text label in
+muted lilac (or `LAN`/`INTERNET`/`DIRECT` green) renders next to
+the peer's nickname.
+
+### Bootstrap reservation + auto-reconnect (V2-A4)
+
+On every `ConnectionEstablished` for a peer that matches an entry
+in `TaskState::bootstrap_peers`, the swarm task calls
+`swarm.listen_on(<addr>/p2p-circuit)`. libp2p drives the
+HOP-RESERVE roundtrip; on accept, `Y7BehaviourEvent::RelayClient`
+fires `Event::ReservationReqAccepted` and a new
+`SwarmEvent::NewListenAddr` lands carrying
+`/<bootstrap>/.../p2p-circuit/p2p/<self>`. That address gets
+announced via identify, picked up by Kad as a provider record, and
+becomes dialable by other clients.
+
+A `tokio::time::interval(15s)` ticks alongside the swarm select
+loop; on each tick it calls `reconnect_lost_bootstraps`, which
+iterates `bootstrap_peers` and `swarm.dial(addr)`s any that
+`swarm.is_connected()` reports as down. `ConnectionClosed` for a
+bootstrap removes the entry from `relay_reserved` so the
+reconnect's `listen_on(/p2p-circuit)` re-runs.
 
 ## Identity
 
@@ -104,16 +153,46 @@ The `sync_queue` table holds pending outbound deliveries with exponential backof
 
 ## Storage schema
 
-See `crates/y7ke-storage/migrations/0001_init.sql` (created in M0 task #4). Tables: `users`, `contacts`, `requests`, `messages`, `sessions`, `keys`, `sync_queue`, `peer_state`. Indexes on `messages(conversation_id, timestamp_ms)`, `sync_queue(next_retry_at)`, `contacts(status)`.
+See `crates/y7ke-storage/migrations/` — migrations land in order:
 
-## What's deferred to V2
+| Migration | What |
+|---|---|
+| `0001_init.sql` | V1 baseline: `users`, `contacts`, `requests`, `messages`, `sessions`, `keys`, `sync_queue`, `peer_state` + indexes on `messages(conversation_id, timestamp_ms)`, `sync_queue(next_retry_at)`, `contacts(status)`. |
+| `0002_strip_session_key.sql` | Drop the legacy `sessions.shared_secret_enc` column once static-DH derivation replaced stored session keys. |
+| `0003_dedup_outgoing_requests.sql` | One-shot cleanup for installs that piled up duplicate outgoing requests during the V2-A4 dial-discovery bug. Keeps the earliest row per peer, drops the rest. |
+| `0004_settings.sql` | V2-A4 single-row `settings` table seeded with defaults; `(id INTEGER PRIMARY KEY CHECK (id = 1), payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL)`. |
 
-- QUIC transport
-- Kademlia DHT + IPFS/Y7KE bootstrap nodes
-- AutoNAT + DCUtR + circuit-relay for NAT traversal
+## Settings + dial modes (V2-A4)
+
+`y7ke_core::settings::{Settings, DialModes, BootstrapEntry,
+DEFAULT_RELAY_BOOTSTRAP}` define the wire types (re-exported, ts-rs
+generates the matching TS in `ui/src/lib/gen/`). Stored as JSON in
+the `settings` row.
+
+`y7ke_storage::dao::SettingsDao::{get, update}` round-trip a
+single-row entry. `y7ke_app::AppHandle` exposes
+`get_settings`, `update_settings`, `list_bootstraps`,
+`ping_all_bootstraps`, `select_best_bootstrap`. `ping_all_bootstraps`
+opens raw TCP (5-s budget, `tokio::join_all`) and caches latencies
+in `AppInner::bootstrap_pings: RwLock<HashMap<String,
+BootstrapPingState>>`. `update_settings` writes the row, calls
+`net.update_bootstraps(...)` (the new `NetCommand::UpdateBootstraps`),
+and emits `AppEvent::SettingsChanged` so the UI refreshes its
+in-memory copy.
+
+`y7ke_app::config::load_bootstraps(&Db)` resolves the effective
+list at boot in this order, first non-empty wins: env →
+`Settings::extra_bootstraps` from the DB → `bootstrap.toml` file →
+compile-time `DEFAULT_BOOTSTRAPS`. Whatever source contributes,
+`DEFAULT_RELAY_BOOTSTRAP` is always prepended (deduped) so a typo
+in user config can never strand the client.
+
+## What's deferred past V2-A4
+
+- AutoNAT v2 (A3) — public-reachability detection + UI pill
+- DCUtR (A5) — upgrade `Relayed` → `Direct` once hole-punched
+- QUIC transport (A6)
 - OS keychain integration (currently DEK is file-only)
 - Argon2id passphrase vault for headless / no-libsecret hosts
-- Read receipts (`Delivered` status)
-- Group conversations
-- File transfer
-- Onion / anonymous routing
+- Double Ratchet forward secrecy (B2)
+- Group conversations, file transfer, onion / anonymous routing
