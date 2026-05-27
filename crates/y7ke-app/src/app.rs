@@ -114,6 +114,12 @@ impl AppHandle {
         self.event_tx.subscribe()
     }
 
+    /// Send the swarm a Shutdown command. The background event loop will
+    /// exit once the swarm task drops its broadcast sender.
+    pub async fn shutdown(&self) -> Result<()> {
+        self.inner.net.shutdown().await
+    }
+
     // ------------------------------------------------------------
     // V1 capability 1 — identity is exposed through `my_y7_id`.
     // V1 capability 2 — add contact by key.
