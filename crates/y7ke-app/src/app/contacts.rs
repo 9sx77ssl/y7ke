@@ -35,25 +35,40 @@ impl AppHandle {
             return Ok(());
         }
 
-        self.inner
+        // Dedup: if an outgoing pending request to this peer already
+        // exists, skip the insert. Without this, each retry click from
+        // a UI flow where the dial failed produced a fresh row, piling
+        // up duplicate "pending…" cards in the Requests view.
+        let outgoing = self
+            .inner
             .db
             .requests()
-            .insert(NewRequest {
-                direction: RequestDirection::Outgoing,
-                peer_y7_id: peer,
-                initial_text: greeting.clone(),
-            })
+            .list_pending(Some(RequestDirection::Outgoing))
             .await?;
-        self.inner
-            .db
-            .contacts()
-            .insert(NewContact {
-                y7_id: peer,
-                ed25519_pub: *peer.pubkey(),
-                nickname: None,
-                status: ContactStatus::PendingOut,
-            })
-            .await?;
+        let already_pending = outgoing.iter().any(|r| r.peer_y7_id == peer);
+        if !already_pending {
+            self.inner
+                .db
+                .requests()
+                .insert(NewRequest {
+                    direction: RequestDirection::Outgoing,
+                    peer_y7_id: peer,
+                    initial_text: greeting.clone(),
+                })
+                .await?;
+        }
+        if self.inner.db.contacts().get(&peer).await?.is_none() {
+            self.inner
+                .db
+                .contacts()
+                .insert(NewContact {
+                    y7_id: peer,
+                    ed25519_pub: *peer.pubkey(),
+                    nickname: None,
+                    status: ContactStatus::PendingOut,
+                })
+                .await?;
+        }
 
         self.dial_with_discovery(peer).await;
         let (req, eph) = crate::handshake::open_initiator(

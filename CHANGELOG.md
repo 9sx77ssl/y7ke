@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.32] — 2026-05-27
+
+- fix(app): discovery step 1 now reports whether a dial was actually issued
+
 ## [0.1.31] — 2026-05-27
 
 - ci: build only Linux AppImage + Windows .exe
