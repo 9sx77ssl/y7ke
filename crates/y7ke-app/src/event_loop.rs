@@ -121,7 +121,10 @@ async fn dispatch(
             channel,
         } => handle_sync(inner, peer, request, channel).await,
         NetEvent::Error { message } => {
-            tracing::warn!(message = %message, "net error");
+            // Routine swarm errors (Kad maintenance dial-fails to
+            // long-dead local addrs) come through here; user-actionable
+            // failures surface via command-level errors instead.
+            tracing::debug!(message = %message, "net error");
             Ok(())
         }
     }

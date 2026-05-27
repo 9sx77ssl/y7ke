@@ -439,7 +439,15 @@ async fn handle_swarm_event(
             let peer = peer_id
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "<unknown>".into());
-            warn!(%peer, "outgoing connection error: {error}");
+            // Dial errors are routine: Kad's periodic routing
+            // maintenance probes every peer it ever heard of, and
+            // long-dead local addresses (172.17.x.x docker bridges,
+            // 192.168.x.x home LANs of strangers, Tailscale interfaces)
+            // refuse the connection. libp2p evicts stale entries on
+            // its own; logging each one at WARN drowns out the
+            // signal. User-initiated dials surface via
+            // `AppError::Network` in the calling command instead.
+            debug!(%peer, "outgoing connection error: {error}");
             emit(
                 event_tx,
                 NetEvent::Error {
