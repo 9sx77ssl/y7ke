@@ -74,11 +74,17 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
     for t in &offline_texts {
         alice.send_message(bob_id, t.clone()).await?;
     }
-    // Give the bg push_one tasks time to fail + enqueue.
-    sleep(Duration::from_secs(2)).await;
 
-    // Wipe the queue so any delivery must come from sync-reconcile.
-    let cleared = alice.debug_clear_outbound_queue(&bob_id).await?;
+    // The bg push_one has a 5s SEND_TIMEOUT before it gives up + enqueues.
+    // Poll for up to 30s on the queue state to handle slower CI runners.
+    let mut cleared = 0;
+    for _ in 0..60 {
+        sleep(Duration::from_millis(500)).await;
+        cleared = alice.debug_clear_outbound_queue(&bob_id).await?;
+        if cleared >= 3 {
+            break;
+        }
+    }
     assert!(
         cleared >= 3,
         "expected at least 3 queue entries to wipe, got {cleared}"
