@@ -126,6 +126,17 @@ impl NetHandle {
             .map_err(|e| AppError::network(format!("command channel closed: {e}")))
     }
 
+    /// Fire-and-forget dial of a fully-qualified `Multiaddr` (typically
+    /// `<transport-addr>/p2p/<peer-id>`). Useful when the address comes
+    /// from outside mDNS — for example, a hand-pasted bootstrap or a
+    /// test that wants to skip discovery.
+    pub async fn dial_address(&self, address: Multiaddr) -> Result<(), AppError> {
+        self.cmd_tx
+            .send(NetCommand::DialAddress { address })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))
+    }
+
     /// Send a handshake request and await the matching response. Returns
     /// `AppError::Network` on timeout, transport failure, or task
     /// shutdown.
@@ -274,6 +285,10 @@ pub enum NetCommand {
     /// term Ed25519 public key). The swarm task derives the libp2p
     /// `PeerId` and uses any cached addresses.
     Dial { y7_id: Y7Id },
+    /// Dial an arbitrary, fully-qualified `Multiaddr`. The address is
+    /// also recorded in the per-peer address book so subsequent
+    /// `send_*` calls can re-use it.
+    DialAddress { address: Multiaddr },
     /// Open `/y7ke/handshake/1.0.0` to `peer` and await the response.
     SendHandshake {
         peer: PeerId,

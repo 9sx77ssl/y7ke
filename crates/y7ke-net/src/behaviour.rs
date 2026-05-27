@@ -7,7 +7,9 @@
 use std::time::Duration;
 
 use libp2p::{
-    identify, identity::Keypair, mdns, ping,
+    identify,
+    identity::Keypair,
+    mdns, ping,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
 };
@@ -75,8 +77,8 @@ impl Y7Behaviour {
             local_peer_id,
         )?;
 
-        let rr_config = request_response::Config::default()
-            .with_request_timeout(Duration::from_secs(15));
+        let rr_config =
+            request_response::Config::default().with_request_timeout(Duration::from_secs(15));
 
         let handshake = request_response::cbor::Behaviour::<HandshakeReq, HandshakeResp>::new(
             [(HANDSHAKE_PROTOCOL, ProtocolSupport::Full)],

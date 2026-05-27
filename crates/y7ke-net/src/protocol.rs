@@ -31,6 +31,80 @@
 use libp2p::StreamProtocol;
 use serde::{Deserialize, Serialize};
 
+/// Local serde helpers for fixed-size byte arrays that serde does not
+/// support out of the box.
+///
+/// `serde` ships built-in `Deserialize` impls for `[T; N]` only up to
+/// `N = 32`. Y7KE wire types include `[u8; 64]` (an Ed25519 signature),
+/// so we hand-roll a small `serialize_with`/`deserialize_with` pair.
+/// Encoding is "fixed-size sequence of `u8`" — the same shape that
+/// `[u8; 32]` already uses, so wire compatibility is consistent across
+/// every byte array in this module.
+mod sig_bytes {
+    use serde::de::{Error, SeqAccess, Visitor};
+    use serde::ser::SerializeTuple;
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(bytes: &[u8; 64], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut tup = serializer.serialize_tuple(64)?;
+        for b in bytes {
+            tup.serialize_element(b)?;
+        }
+        tup.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 64], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SigVisitor;
+        impl<'de> Visitor<'de> for SigVisitor {
+            type Value = [u8; 64];
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("64 bytes")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut buf = [0u8; 64];
+                for (i, slot) in buf.iter_mut().enumerate() {
+                    *slot = seq
+                        .next_element()?
+                        .ok_or_else(|| A::Error::invalid_length(i, &self))?;
+                }
+                Ok(buf)
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                if v.len() != 64 {
+                    return Err(E::invalid_length(v.len(), &self));
+                }
+                let mut buf = [0u8; 64];
+                buf.copy_from_slice(v);
+                Ok(buf)
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                self.visit_bytes(&v)
+            }
+        }
+        deserializer.deserialize_tuple(64, SigVisitor)
+    }
+}
+
 /// `/y7ke/handshake/1.0.0` — session-establishment request/response.
 pub const HANDSHAKE_PROTOCOL: StreamProtocol = StreamProtocol::new("/y7ke/handshake/1.0.0");
 
@@ -62,6 +136,7 @@ pub struct HandshakeReq {
     /// Initiator's ephemeral X25519 public key.
     pub initiator_eph_x25519_pub: [u8; 32],
     /// Ed25519 signature over `initiator_eph_x25519_pub || responder_pubkey`.
+    #[serde(with = "sig_bytes")]
     pub sig: [u8; 64],
     /// Optional human-readable greeting attached to a contact request.
     pub greeting: Option<String>,
@@ -73,6 +148,7 @@ pub struct HandshakeResp {
     /// Responder's ephemeral X25519 public key.
     pub responder_eph_x25519_pub: [u8; 32],
     /// Ed25519 signature over `responder_eph_x25519_pub || initiator_pubkey`.
+    #[serde(with = "sig_bytes")]
     pub sig: [u8; 64],
     /// `true` if the responder accepted the contact request.
     pub accept: bool,
@@ -99,6 +175,7 @@ pub struct MessageEnvelope {
     /// ChaCha20-Poly1305 ciphertext + tag of the UTF-8 plaintext.
     pub ciphertext: Vec<u8>,
     /// Ed25519 signature over `message_id || timestamp_ms.to_le_bytes() || ciphertext`.
+    #[serde(with = "sig_bytes")]
     pub sig: [u8; 64],
 }
 
@@ -141,7 +218,9 @@ pub struct ConversationDigest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SyncReq {
     /// Round 1: announce per-conversation digests.
-    Header { conversations: Vec<ConversationDigest> },
+    Header {
+        conversations: Vec<ConversationDigest>,
+    },
     /// Round 2: request missing envelopes for a single conversation.
     /// `since` is the last UUIDv7 the caller already holds (exclusive); a
     /// `None` means "from the beginning of the conversation."
