@@ -9,7 +9,7 @@ use y7ke_core::error::Result;
 use y7ke_core::{
     AppError, AppEvent, ConnectionKind, ContactStatus, ConversationId, MessageStatus, Y7Id,
 };
-use y7ke_net::protocol::{MessageEnvelope, MsgResp, SyncReq, SyncResp};
+use y7ke_net::protocol::{ConversationDigest, MessageEnvelope, MsgResp, SyncReq, SyncResp};
 use y7ke_net::{NetEvent, PeerId};
 use y7ke_storage::dao::contacts::NewContact;
 use y7ke_storage::dao::messages::NewMessage;
@@ -60,6 +60,7 @@ async fn dispatch(
             tracing::debug!(peer = %peer, addrs = ?addrs, y7_id = ?y7_id, "peer discovered");
             if let Some(y7) = y7_id {
                 drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+                spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "peer discovered without recoverable Y7Id");
             }
@@ -68,12 +69,12 @@ async fn dispatch(
         NetEvent::ConnectionEstablished { peer, kind } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
                 inner.presence.write().await.insert(y7, kind);
-                tracing::debug!(%y7, ?kind, "connection established → presence cached");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: kind,
                 });
                 drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+                spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "connection established with non-Ed25519 peer (V1 should never see this)");
             }
@@ -373,10 +374,33 @@ async fn handle_sync(
     };
 
     let resp = match request {
-        SyncReq::Header { conversations: _ } => {
-            // V1 minimal sync: respond with empty digest (we use queue-based
-            // retry instead of header-based reconcile).
-            SyncResp::HeaderAck { ours: Vec::new() }
+        SyncReq::Header { conversations } => {
+            // For each conversation the requester listed, return our own
+            // outbound/inbound HWMs scoped to (self, requester). Anything else
+            // is silently dropped.
+            let expected = ConversationId::between(&inner.my_y7_id, &requester_y7);
+            let mut ours = Vec::new();
+            for cd in &conversations {
+                if cd.conversation_id != *expected.as_bytes() {
+                    continue;
+                }
+                let my_outbound = inner
+                    .db
+                    .messages()
+                    .highest_outbound(&expected, &inner.my_pubkey)
+                    .await?;
+                let my_inbound = inner
+                    .db
+                    .messages()
+                    .highest_inbound(&expected, &inner.my_pubkey)
+                    .await?;
+                ours.push(ConversationDigest {
+                    conversation_id: cd.conversation_id,
+                    highest_outbound_msg_id: my_outbound.map(|m| *m.as_bytes()),
+                    highest_inbound_msg_id: my_inbound.map(|m| *m.as_bytes()),
+                });
+            }
+            SyncResp::HeaderAck { ours }
         }
         SyncReq::Pull {
             conversation_id,
@@ -533,6 +557,228 @@ async fn drain_queue_for_peer(
         }
     }
     Ok(())
+}
+
+// 50 × 64 = 3200 envelopes max per reconnect.
+const SYNC_PULL_LIMIT: u16 = 50;
+const SYNC_MAX_PULL_PAGES: u8 = 64;
+
+/// Detach kick_sync to a tokio task so the event loop never blocks on
+/// send_sync (otherwise both peers can deadlock waiting for each other).
+fn spawn_kick_sync(
+    inner: Arc<AppInner>,
+    event_tx: broadcast::Sender<AppEvent>,
+    peer_y7: Y7Id,
+    peer_id: PeerId,
+) {
+    tokio::spawn(async move {
+        if let Err(e) = kick_sync_for_peer(&inner, &event_tx, &peer_y7, peer_id).await {
+            tracing::debug!(%peer_y7, error = %e, "kick_sync_for_peer failed");
+        }
+    });
+}
+
+/// Initiator-side `/y7ke/sync/1.0.0`: Header → Pull loop → Ack.
+async fn kick_sync_for_peer(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    peer_y7: &Y7Id,
+    peer_id: PeerId,
+) -> Result<()> {
+    let Some(contact) = inner.db.contacts().get(peer_y7).await? else {
+        return Ok(());
+    };
+    if contact.status != ContactStatus::Accepted {
+        return Ok(());
+    }
+
+    let conv = ConversationId::between(&inner.my_y7_id, peer_y7);
+    let my_outbound = inner
+        .db
+        .messages()
+        .highest_outbound(&conv, &inner.my_pubkey)
+        .await?;
+    let my_inbound = inner
+        .db
+        .messages()
+        .highest_inbound(&conv, &inner.my_pubkey)
+        .await?;
+    let my_digest = ConversationDigest {
+        conversation_id: *conv.as_bytes(),
+        highest_outbound_msg_id: my_outbound.map(|m| *m.as_bytes()),
+        highest_inbound_msg_id: my_inbound.map(|m| *m.as_bytes()),
+    };
+
+    let header_resp = match inner
+        .net
+        .send_sync(
+            peer_id,
+            SyncReq::Header {
+                conversations: vec![my_digest],
+            },
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(%peer_y7, error = %e, "sync Header send failed");
+            return Ok(());
+        }
+    };
+
+    let their = match header_resp {
+        SyncResp::HeaderAck { ours } => ours
+            .into_iter()
+            .find(|d| d.conversation_id == *conv.as_bytes()),
+        other => {
+            tracing::warn!(?other, "unexpected response to sync Header");
+            return Ok(());
+        }
+    };
+
+    let Some(their) = their else {
+        return Ok(());
+    };
+
+    // UUIDv7 byte-order matches chronological + SQL ORDER BY.
+    let need_pull = match (their.highest_outbound_msg_id, my_inbound) {
+        (Some(theirs_out), Some(my_in)) => theirs_out > *my_in.as_bytes(),
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+    if !need_pull {
+        return Ok(());
+    }
+
+    let mut since = my_inbound.map(|m| *m.as_bytes());
+    let mut newly_persisted: Vec<[u8; 16]> = Vec::new();
+    for _ in 0..SYNC_MAX_PULL_PAGES {
+        let resp = match inner
+            .net
+            .send_sync(
+                peer_id,
+                SyncReq::Pull {
+                    conversation_id: *conv.as_bytes(),
+                    since,
+                    limit: SYNC_PULL_LIMIT,
+                },
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(%peer_y7, error = %e, "sync Pull send failed mid-loop");
+                break;
+            }
+        };
+        let (envelopes, has_more) = match resp {
+            SyncResp::Pull {
+                envelopes,
+                has_more,
+            } => (envelopes, has_more),
+            other => {
+                tracing::warn!(?other, "unexpected response to sync Pull");
+                break;
+            }
+        };
+        if envelopes.is_empty() {
+            break;
+        }
+        let last_id = envelopes.last().map(|e| e.message_id);
+        for env in envelopes {
+            match ingest_synced_envelope(inner, event_tx, peer_y7, &env).await {
+                Ok(true) => newly_persisted.push(env.message_id),
+                Ok(false) => {}
+                Err(e) => tracing::warn!(error = %e, "ingest_synced_envelope failed"),
+            }
+        }
+        if !has_more {
+            break;
+        }
+        since = last_id;
+    }
+
+    if !newly_persisted.is_empty() {
+        let _ = inner
+            .net
+            .send_sync(
+                peer_id,
+                SyncReq::Ack {
+                    conversation_id: *conv.as_bytes(),
+                    confirmed_ids: newly_persisted,
+                },
+            )
+            .await;
+    }
+
+    Ok(())
+}
+
+/// Verify sig, decrypt, INSERT OR IGNORE; emit MessageReceived on new row.
+async fn ingest_synced_envelope(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    expected_sender: &Y7Id,
+    envelope: &MessageEnvelope,
+) -> Result<bool> {
+    // M2 cap.
+    if envelope.ciphertext.len() > crate::app::MAX_MESSAGE_BYTES + 256 {
+        tracing::warn!(
+            size = envelope.ciphertext.len(),
+            "oversized synced envelope"
+        );
+        return Ok(false);
+    }
+
+    let sender_y7 = Y7Id::from_pubkey(envelope.sender_pub);
+    if &sender_y7 != expected_sender {
+        tracing::warn!(claimed = %sender_y7, expected = %expected_sender, "synced envelope signed by wrong key");
+        return Ok(false);
+    }
+
+    let session = inner
+        .db
+        .sessions()
+        .get(&sender_y7)
+        .await?
+        .ok_or_else(|| AppError::network(format!("no session for {sender_y7}")))?;
+    let verifying = VerifyingKey::from_bytes(&envelope.sender_pub)?;
+    let kind = messaging::open_envelope(envelope, &verifying, &session.session_key)?;
+    let text = match kind {
+        messaging::PlaintextKind::Text(t) => t,
+        messaging::PlaintextKind::Control(_) => {
+            tracing::debug!("control payload arrived via sync; ignoring");
+            return Ok(false);
+        }
+    };
+
+    let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
+    let inserted = inner
+        .db
+        .messages()
+        .insert(NewMessage {
+            message_id: y7ke_core::MessageId::from_bytes(envelope.message_id),
+            conversation_id,
+            sender_pub: envelope.sender_pub,
+            recipient_pub: inner.my_pubkey,
+            timestamp_ms: envelope.timestamp_ms,
+            status: MessageStatus::Synced,
+            payload_enc: envelope.ciphertext.clone(),
+            payload_nonce: envelope.nonce,
+            sig: envelope.sig,
+        })
+        .await?;
+
+    if inserted {
+        let _ = event_tx.send(AppEvent::MessageReceived {
+            conversation_id: conversation_id.to_hex(),
+            message_id: y7ke_core::MessageId::from_bytes(envelope.message_id).to_string(),
+            sender_y7_id: sender_y7.to_uri(),
+            timestamp_ms: envelope.timestamp_ms,
+            text,
+        });
+    }
+    Ok(inserted)
 }
 
 /// Exponential backoff capped at 1 hour: `min(2^attempts * 30s, 1h)`.

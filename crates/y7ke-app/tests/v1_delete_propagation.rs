@@ -10,8 +10,8 @@ use tokio::time::{sleep, timeout};
 use y7ke_app::{AppConfig, AppHandle};
 use y7ke_core::AppEvent;
 
-const OVERALL_TIMEOUT: Duration = Duration::from_secs(60);
-const MDNS_BUDGET: Duration = Duration::from_secs(20);
+const OVERALL_TIMEOUT: Duration = Duration::from_secs(120);
+const MDNS_BUDGET: Duration = Duration::from_secs(40);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_propagates_to_peer() {

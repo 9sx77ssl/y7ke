@@ -65,6 +65,24 @@ impl AppHandle {
         Ok(out)
     }
 
+    /// Drop queued outbound retries for `peer` without delivering. Test-only.
+    #[doc(hidden)]
+    pub async fn debug_clear_outbound_queue(&self, peer: &Y7Id) -> Result<usize> {
+        let due = self.inner.db.sync_queue().due(i64::MAX, 100_000).await?;
+        let mut n = 0;
+        for entry in due {
+            if &entry.target_peer_y7_id == peer {
+                self.inner
+                    .db
+                    .sync_queue()
+                    .remove(&entry.message_id, peer)
+                    .await?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     /// Non-blocking send: persists + spawns bg push, returns immediately.
     pub async fn send_message(&self, to: Y7Id, text: String) -> Result<MessageId> {
         if to == self.inner.my_y7_id {
