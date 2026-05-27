@@ -59,6 +59,9 @@ pub enum AppEvent {
         connection: ConnectionKind,
     },
 
+    /// User settings (dial modes / bootstrap list) were updated.
+    SettingsChanged,
+
     /// Operator-visible error surfaced from a background task.
     BackgroundError { message: String },
 }
@@ -74,6 +77,7 @@ impl AppEvent {
             AppEvent::MessageReceived { .. } => "message_received",
             AppEvent::MessageStatusChanged { .. } => "message_status_changed",
             AppEvent::PresenceChanged { .. } => "presence_changed",
+            AppEvent::SettingsChanged => "settings_changed",
             AppEvent::BackgroundError { .. } => "background_error",
         }
     }

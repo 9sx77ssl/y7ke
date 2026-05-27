@@ -137,6 +137,10 @@ impl Db {
         dao::peer_state::PeerStateDao::new(&self.pool)
     }
 
+    pub fn settings(&self) -> dao::settings::SettingsDao<'_> {
+        dao::settings::SettingsDao::new(&self.pool)
+    }
+
     /// Wipe ALL local state for `peer`: messages, session, contact, requests,
     /// sync_queue, peer_state. Used by delete-chat.
     pub async fn wipe_peer(
