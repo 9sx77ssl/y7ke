@@ -60,7 +60,9 @@
     cursor: not-allowed;
   }
   .tone-danger:hover:not(:disabled) {
-    background: var(--y7-red-soft);
+    /* Background matches every other IconButton on hover so the close affordance
+     * isn't louder than minimize/maximize — only the glyph itself tints red. */
+    background: var(--y7-bg-hover);
     color: var(--y7-red);
   }
   .tone-accent:hover:not(:disabled) {

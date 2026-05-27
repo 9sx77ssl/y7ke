@@ -284,6 +284,41 @@ async fn handle_msg(
         .respond_msg_take(channel, MsgResp { ack: true })
         .await?;
 
+    // Auto-promote: if our contact for the sender is still pending (because
+    // we sent the request and they haven't messaged us back yet, or because
+    // we received their handshake but they hadn't explicitly chosen Accept),
+    // the fact that they're now sending us an actual message is the practical
+    // signal that the relationship is two-way. Promote to Accepted and
+    // resolve any still-pending requests with them.
+    if let Some(contact) = inner.db.contacts().get(&sender_y7).await? {
+        if matches!(
+            contact.status,
+            y7ke_core::ContactStatus::PendingOut | y7ke_core::ContactStatus::PendingIn
+        ) {
+            inner
+                .db
+                .contacts()
+                .update_status(&sender_y7, y7ke_core::ContactStatus::Accepted)
+                .await?;
+            for r in inner.db.requests().list_pending(None).await? {
+                if r.peer_y7_id == sender_y7 {
+                    let _ = inner
+                        .db
+                        .requests()
+                        .resolve(r.id, y7ke_core::RequestResolution::Accepted)
+                        .await;
+                    let _ = event_tx.send(AppEvent::RequestResolved {
+                        y7_id: sender_y7.to_uri(),
+                        resolution: y7ke_core::RequestResolution::Accepted,
+                    });
+                }
+            }
+            let _ = event_tx.send(AppEvent::ContactAdded {
+                y7_id: sender_y7.to_uri(),
+            });
+        }
+    }
+
     if inserted {
         let _ = event_tx.send(AppEvent::MessageReceived {
             conversation_id: conversation_id.to_hex(),

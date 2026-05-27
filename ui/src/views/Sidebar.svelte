@@ -40,6 +40,17 @@
         return "offline";
     }
   }
+
+  function pendingLabel(status: string): string | null {
+    switch (status) {
+      case "pending_out":
+        return "pending — waiting for accept";
+      case "pending_in":
+        return "pending — accept in requests";
+      default:
+        return null;
+    }
+  }
 </script>
 
 <aside class="sidebar">
@@ -92,7 +103,7 @@
   </div>
 
   <ul class="contacts">
-    {#if contacts.accepted.length === 0}
+    {#if contacts.visible.length === 0}
       <li class="empty">
         {#if contacts.loading}
           loading…
@@ -104,14 +115,15 @@
       </li>
     {/if}
 
-    {#each contacts.accepted as c (c.y7_id)}
+    {#each contacts.visible as c (c.y7_id)}
       {@const presence = getPresence(c.y7_id)}
+      {@const pending = pendingLabel(c.status)}
       <li>
         <ContactRow
           label={c.nickname ?? truncateY7Id(c.y7_id, 8, 6)}
-          sublabel={c.nickname ? truncateY7Id(c.y7_id, 6, 4) : undefined}
-          presence={dotTone(presence)}
-          title="{c.y7_id} — {presenceLabel(presence)}"
+          sublabel={pending ?? (c.nickname ? truncateY7Id(c.y7_id, 6, 4) : undefined)}
+          presence={pending ? "connecting" : dotTone(presence)}
+          title="{c.y7_id}{pending ? ` — ${pending}` : ` — ${presenceLabel(presence)}`}"
           active={isOpen(c.y7_id)}
           onclick={() => openChatWith(c.y7_id)}
         />
@@ -120,10 +132,10 @@
   </ul>
 
   <div class="footer" aria-hidden="true">
-    {#if contacts.accepted.length > 0}
+    {#if contacts.visible.length > 0}
       <span class="count">
-        {contacts.accepted.length}
-        {contacts.accepted.length === 1 ? "contact" : "contacts"}
+        {contacts.visible.length}
+        {contacts.visible.length === 1 ? "contact" : "contacts"}
       </span>
     {/if}
   </div>

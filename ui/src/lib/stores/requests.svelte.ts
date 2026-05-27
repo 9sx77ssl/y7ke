@@ -70,7 +70,10 @@ export async function sendContactRequestAction(
 ): Promise<void> {
   // Errors propagate to the caller view so it can show inline feedback.
   await rpcSend(y7Id, greeting);
-  await refreshRequests();
+  // The contact row (pending_out) is inserted by the backend; the sidebar
+  // needs to know about it immediately so the user has something to click
+  // even before the peer accepts.
+  await Promise.all([refreshRequests(), refreshContacts()]);
 }
 
 export async function acceptRequestAction(requestId: number): Promise<void> {

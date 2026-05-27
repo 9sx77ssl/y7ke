@@ -35,6 +35,20 @@ export const contacts = {
   get accepted(): ContactView[] {
     return state.items.filter((c) => c.status === "accepted");
   },
+  /**
+   * Everything the sidebar should render: accepted contacts and any still-
+   * pending ones (so the sender sees their pending peer immediately after
+   * `send_contact_request` instead of waiting for them to message back).
+   * Excludes `blocked` and `removed`.
+   */
+  get visible(): ContactView[] {
+    return state.items.filter(
+      (c) =>
+        c.status === "accepted" ||
+        c.status === "pending_out" ||
+        c.status === "pending_in",
+    );
+  },
 };
 
 export async function refreshContacts(): Promise<void> {

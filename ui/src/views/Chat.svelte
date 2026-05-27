@@ -146,7 +146,8 @@
     <Textarea
       bind:value={composer}
       placeholder="write a message…"
-      rows={2}
+      rows={1}
+      maxRows={5}
       disabled={chat.sending}
       ariaLabel="message"
       onkeydown={handleKeydown}
