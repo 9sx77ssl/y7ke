@@ -66,9 +66,10 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("send_contact_request failed: {e}"))?;
 
     // V1 capability 3 — Bob sees the inbound request and accepts it.
-    let received = wait_for_event(&mut bob_events, |ev| {
-        matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri())
-    })
+    let received = wait_for_event(
+        &mut bob_events,
+        |ev| matches!(ev, AppEvent::RequestReceived { y7_id, .. } if *y7_id == alice_id.to_uri()),
+    )
     .await?;
     let _ = received;
 
@@ -88,34 +89,33 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
 
     // V1 capability 4 — open chat (just verify list_messages works).
     let conversation_id = ConversationId::between(&alice_id, &bob_id);
-    let initial = alice.list_messages(&conversation_id.to_hex(), 100).await?;
+    let initial = alice.list_messages(bob_id, 100).await?;
     assert!(initial.is_empty(), "no messages yet");
 
     // V1 capability 5 — exchange encrypted messages.
     let alice_to_bob_text = "hello bob, this is alice";
-    let _mid = alice
-        .send_message(bob_id, alice_to_bob_text.into())
-        .await?;
+    let _mid = alice.send_message(bob_id, alice_to_bob_text.into()).await?;
 
-    let bob_recv = wait_for_event(&mut bob_events, |ev| {
-        matches!(ev, AppEvent::MessageReceived { text, .. } if text == alice_to_bob_text)
-    })
+    let bob_recv = wait_for_event(
+        &mut bob_events,
+        |ev| matches!(ev, AppEvent::MessageReceived { text, .. } if text == alice_to_bob_text),
+    )
     .await?;
     let _ = bob_recv;
 
     let bob_to_alice_text = "hi alice, this is bob";
-    let _bmid = bob
-        .send_message(alice_id, bob_to_alice_text.into())
-        .await?;
-    let alice_recv = wait_for_event(&mut alice_events, |ev| {
-        matches!(ev, AppEvent::MessageReceived { text, .. } if text == bob_to_alice_text)
-    })
+    let _bmid = bob.send_message(alice_id, bob_to_alice_text.into()).await?;
+    let alice_recv = wait_for_event(
+        &mut alice_events,
+        |ev| matches!(ev, AppEvent::MessageReceived { text, .. } if text == bob_to_alice_text),
+    )
     .await?;
     let _ = alice_recv;
 
     // V1 capability 6 — both DBs hold both messages.
-    let bob_msgs = bob.list_messages(&conversation_id.to_hex(), 100).await?;
-    let alice_msgs = alice.list_messages(&conversation_id.to_hex(), 100).await?;
+    let _ = conversation_id; // ConversationId import is still useful for clarity above
+    let bob_msgs = bob.list_messages(alice_id, 100).await?;
+    let alice_msgs = alice.list_messages(bob_id, 100).await?;
     assert_eq!(bob_msgs.len(), 2, "bob should see two messages");
     assert_eq!(alice_msgs.len(), 2, "alice should see two messages");
 

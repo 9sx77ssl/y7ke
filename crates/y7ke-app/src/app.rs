@@ -253,12 +253,10 @@ impl AppHandle {
             .collect())
     }
 
-    pub async fn list_messages(
-        &self,
-        conversation_hex: &str,
-        limit: i64,
-    ) -> Result<Vec<MessageView>> {
-        let conv = parse_conversation_id(conversation_hex)?;
+    /// List messages exchanged with `peer`. The conversation ID is derived
+    /// internally from the sorted pubkeys.
+    pub async fn list_messages(&self, peer: Y7Id, limit: i64) -> Result<Vec<MessageView>> {
+        let conv = ConversationId::between(&self.inner.my_y7_id, &peer);
         let rows = self
             .inner
             .db
@@ -380,52 +378,5 @@ impl AppHandle {
         });
 
         Ok(message_id)
-    }
-}
-
-fn parse_conversation_id(hex: &str) -> Result<ConversationId> {
-    if hex.len() != 32 {
-        return Err(AppError::invalid_input(format!(
-            "conversation_id must be 32 hex chars, got {}",
-            hex.len()
-        )));
-    }
-    let mut buf = [0u8; 16];
-    for (i, byte) in buf.iter_mut().enumerate() {
-        let hi = parse_hex_nibble(hex.as_bytes()[i * 2])?;
-        let lo = parse_hex_nibble(hex.as_bytes()[i * 2 + 1])?;
-        *byte = (hi << 4) | lo;
-    }
-    Ok(ConversationId(buf))
-}
-
-fn parse_hex_nibble(b: u8) -> Result<u8> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(AppError::invalid_input(format!(
-            "invalid hex byte 0x{b:02x}"
-        ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_conversation_id_round_trip() {
-        let a = Y7Id::from_pubkey([1u8; 32]);
-        let b = Y7Id::from_pubkey([2u8; 32]);
-        let conv = ConversationId::between(&a, &b);
-        let parsed = parse_conversation_id(&conv.to_hex()).unwrap();
-        assert_eq!(parsed, conv);
-    }
-
-    #[test]
-    fn parse_conversation_id_rejects_bad_input() {
-        assert!(parse_conversation_id("too_short").is_err());
-        assert!(parse_conversation_id(&"z".repeat(32)).is_err());
     }
 }

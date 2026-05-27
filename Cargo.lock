@@ -7347,6 +7347,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "y7ke-app",
+ "y7ke-core",
 ]
 
 [[package]]
