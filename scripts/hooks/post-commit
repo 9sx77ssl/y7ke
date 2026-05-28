@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# post-commit: prepend a CHANGELOG.md entry for the bumped version with
+# the just-recorded commit subject, then amend the commit to include it.
+#
+# We do this here (not in pre-commit or prepare-commit-msg) because:
+#   - pre-commit can't see the message — git populates it later.
+#   - prepare-commit-msg runs AFTER git snapshots the index, so anything
+#     it stages lands in the next commit, not this one. That was the
+#     historical bug: every release tag had no notes.
+#
+# A small `.git/.skip_amend` marker breaks the post-commit-fires-on-amend
+# recursion.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Guard: the `--amend` below re-runs post-commit. Bail out on the second
+# call so we don't double-amend.
+if [ -f .git/.skip_amend ]; then
+  rm -f .git/.skip_amend
+  exit 0
+fi
+
+# Skip for merge commits — those re-use their parents' entries.
+if [ -f .git/MERGE_MSG ]; then exit 0; fi
+
+version=$(grep '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+subject=$(git log -1 --pretty=%s)
+today=$(date +%Y-%m-%d)
+
+# Already present? Earliest exit — avoids amending when the entry was
+# manually written or when this hook ran on a no-op.
+if grep -q "^## \[$version\]" CHANGELOG.md 2>/dev/null; then
+  exit 0
+fi
+
+entry="## [$version] — $today
+
+- $subject
+"
+
+if [ -f CHANGELOG.md ]; then
+  tmp=$(mktemp)
+  awk -v entry="$entry" '
+    BEGIN { inserted = 0 }
+    /^## \[/ && !inserted { print entry; inserted = 1 }
+    { print }
+    END { if (!inserted) print entry }
+  ' CHANGELOG.md > "$tmp"
+  mv "$tmp" CHANGELOG.md
+else
+  printf "# Changelog\n\n%s" "$entry" > CHANGELOG.md
+fi
+
+git add CHANGELOG.md
+touch .git/.skip_amend
+# --no-verify skips pre-commit + commit-msg; we still want the version
+# bump those would do to remain, so use --amend instead of a new commit.
+git commit --amend --no-edit --no-verify >/dev/null
