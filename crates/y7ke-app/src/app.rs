@@ -83,6 +83,21 @@ pub(crate) struct AppInner {
     pub dcutr_attempts: std::sync::atomic::AtomicU64,
     pub dcutr_successes: std::sync::atomic::AtomicU64,
     pub dcutr_failures: std::sync::atomic::AtomicU64,
+    /// Wake signal for the presence ticker. Fired by `update_settings`
+    /// (mode change) and by `handle_nat_status` (verdict flip) so
+    /// presence/relay-upgrade work happens within ~1 s of the event
+    /// instead of waiting for the next 30-s tick. The ticker
+    /// `select!`s on this alongside the interval timer; either source
+    /// triggers the same body.
+    pub wake_notify: tokio::sync::Notify,
+    /// Per-Relayed-peer state for the upgrade-from-relay loop: counts
+    /// how many DCUtR attempts we've absorbed since the last
+    /// observed-addr or NAT-verdict change. Used to apply
+    /// exponential backoff so we don't re-dial a peer on every tick
+    /// once we've established the relay path is the only one
+    /// available. Cleared per peer on a successful upgrade or on a
+    /// signal change.
+    pub upgrade_backoff: tokio::sync::RwLock<HashMap<Y7Id, u32>>,
 }
 
 /// Aggregate state derived from AutoNAT v2 probe results.
@@ -142,6 +157,8 @@ impl AppHandle {
             dcutr_attempts: std::sync::atomic::AtomicU64::new(0),
             dcutr_successes: std::sync::atomic::AtomicU64::new(0),
             dcutr_failures: std::sync::atomic::AtomicU64::new(0),
+            wake_notify: tokio::sync::Notify::new(),
+            upgrade_backoff: tokio::sync::RwLock::new(HashMap::new()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -212,13 +229,27 @@ pub(crate) fn best_kind(set: &HashSet<ConnectionKind>) -> ConnectionKind {
 
 const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Background task: every 30 s, walk Accepted contacts and ask the
-/// swarm whether each is still connected. Bumps presence to Offline
-/// when the socket has died silently (libp2p's ping behaviour will
-/// have dropped it, but the `ConnectionClosed` event might have been
-/// missed). For Offline contacts, attempts a soft `net.dial` — does
-/// NOT run Kad discovery from the ticker (that's expensive and
-/// happens on demand via `send_contact_request`).
+/// Background task: every 30 s OR on a `wake_notify` signal, walk
+/// Accepted contacts. Three jobs per iteration:
+///
+/// 1. **Live-ness check** for currently-online peers; demote to
+///    Offline if `swarm.is_connected` says the socket is gone.
+/// 2. **Soft redial** Offline peers via `net.dial` (no Kad lookup —
+///    that's expensive and happens on user demand).
+/// 3. **Upgrade-from-relay** for any peer currently on a Relayed
+///    connection: re-issue `net.dial` to give libp2p a chance to
+///    pick a fresher direct address it may have learned via identify
+///    push since the relay path opened. If the direct dial succeeds
+///    DCUtR's automatic trigger fires; if libp2p only has the relay
+///    address, the existing relay connection is reused (idempotent).
+///    Exponential backoff per peer (1×, 5×, 10× the tick interval)
+///    so we don't hammer permanent-relay pairs. Backoff resets on
+///    AutoNAT verdict flip (which fires `wake_notify`).
+///
+/// The 30-s interval is short enough that "I just unlocked my phone"
+/// → discovery rerun feels near-instant; the wake_notify path makes
+/// settings changes / AutoNAT verdict flips effectively immediate
+/// (~1 s).
 async fn run_presence_ticker(
     inner: std::sync::Weak<AppInner>,
     event_tx: broadcast::Sender<AppEvent>,
@@ -230,7 +261,19 @@ async fn run_presence_ticker(
     tick.tick().await;
 
     loop {
-        tick.tick().await;
+        // Whichever fires first wins; the body is the same.
+        {
+            let Some(inner) = inner.upgrade() else {
+                tracing::debug!("presence ticker: AppInner dropped; exiting");
+                return;
+            };
+            tokio::select! {
+                _ = tick.tick() => {}
+                _ = inner.wake_notify.notified() => {
+                    tracing::debug!("presence ticker: woken by notify (settings/NAT change)");
+                }
+            }
+        }
         let Some(inner) = inner.upgrade() else {
             tracing::debug!("presence ticker: AppInner dropped; exiting");
             return;
@@ -260,6 +303,33 @@ async fn run_presence_ticker(
                     // Soft redial — best-effort. Don't run Kad here.
                     if let Ok(true) = inner.net.dial(c.y7_id).await {
                         tracing::debug!(y7_id = %c.y7_id, "presence ticker: soft redial issued");
+                    }
+                }
+                ConnectionKind::Relayed => {
+                    // V2-A5 "relay is temporary": exp backoff in tick
+                    // units (1, 5, 10 then stay). On AutoNAT verdict
+                    // flip the wake_notify path also resets the
+                    // counter (handled in handle_nat_status).
+                    let attempts = {
+                        let mut bo = inner.upgrade_backoff.write().await;
+                        let n = bo.entry(c.y7_id).or_insert(0);
+                        let old = *n;
+                        *n = n.saturating_add(1);
+                        old
+                    };
+                    let should_try = matches!(attempts, 0 | 5 | 10) || attempts >= 20;
+                    if should_try {
+                        // Live check first — don't fire if the relay
+                        // connection died between events.
+                        if let Ok(true) = inner.net.check_live(c.y7_id).await {
+                            if let Ok(true) = inner.net.dial(c.y7_id).await {
+                                tracing::debug!(
+                                    y7_id = %c.y7_id,
+                                    attempts,
+                                    "presence ticker: relay→direct upgrade dial issued"
+                                );
+                            }
+                        }
                     }
                 }
                 _ => {

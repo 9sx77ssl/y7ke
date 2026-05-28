@@ -111,6 +111,10 @@ async fn dispatch(
                 .dcutr_successes
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
+                // Successful upgrade — clear any accumulated backoff for
+                // this peer so the next relay reconnection (e.g. after
+                // suspend/resume) gets another full retry budget.
+                inner.upgrade_backoff.write().await.remove(&y7);
                 inner.presence.write().await.insert(y7, kind);
                 tracing::info!(%y7, ?kind, "presence upgraded via DCUtR");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
@@ -226,6 +230,15 @@ async fn handle_nat_status(
     if previous != now {
         tracing::info!(?previous, ?now, "autonat: verdict changed");
         let _ = event_tx.send(AppEvent::NatStatusChanged { reachability: now });
+        // V2-A5 upgrade-from-relay: clearing the per-peer attempt
+        // counter and waking the presence ticker gives Relayed peers
+        // an immediate re-dial chance. Skipping when going *to*
+        // Private — there's no point spending packets if we just
+        // confirmed we're behind NAT.
+        if matches!(now, y7ke_core::NatReachability::Public) {
+            inner.upgrade_backoff.write().await.clear();
+            inner.wake_notify.notify_one();
+        }
     }
     Ok(())
 }
