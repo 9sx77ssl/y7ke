@@ -703,6 +703,10 @@ async fn handle_swarm_event(
             handle_dcutr(event_tx, event);
         }
 
+        SwarmEvent::Behaviour(Y7BehaviourEvent::AutonatClient(event)) => {
+            handle_autonat(event_tx, event);
+        }
+
         _ => {
             // Other variants (Dialing, IncomingConnection, ExternalAddr*, ...) are
             // not load-bearing in V1.
@@ -729,6 +733,38 @@ fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
             info!(peer = %event.remote_peer_id, error = %e, "dcutr: direct upgrade failed (staying on relay)");
         }
     }
+}
+
+/// V2-A3: forward AutoNAT v2 probe verdicts. A successful test confirms
+/// `tested_addr` is externally reachable; failure means the server's
+/// fresh outbound dial couldn't reach us at that address. The app layer
+/// aggregates these into a single `NatReachability` for UI display and
+/// upgrade-loop gating.
+fn handle_autonat(
+    event_tx: &broadcast::Sender<NetEvent>,
+    event: libp2p::autonat::v2::client::Event,
+) {
+    let reachable = event.result.is_ok();
+    let outcome = if reachable {
+        "reachable"
+    } else {
+        "unreachable"
+    };
+    info!(
+        peer = %event.server,
+        addr = %event.tested_addr,
+        bytes_sent = event.bytes_sent,
+        outcome,
+        "autonat: probe result"
+    );
+    emit(
+        event_tx,
+        NetEvent::NatStatus {
+            tested_addr: event.tested_addr,
+            server: event.server,
+            reachable,
+        },
+    );
 }
 
 fn handle_relay_client(event: relay::client::Event) {

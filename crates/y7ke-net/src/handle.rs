@@ -457,6 +457,16 @@ pub enum NetEvent {
     /// folds traffic over to the new direct path; the application layer
     /// should bump presence to `kind = Direct` immediately.
     ConnectionUpgraded { peer: PeerId, kind: ConnectionKind },
+    /// AutoNAT v2 verdict — a tested external address either came back
+    /// reachable or not. The app layer aggregates these into a single
+    /// `NatReachability` per-app, used to gate the upgrade-from-relay
+    /// loop. Fires once per AutoNAT probe (every ~5s by default while
+    /// candidates exist).
+    NatStatus {
+        tested_addr: Multiaddr,
+        server: PeerId,
+        reachable: bool,
+    },
     /// Inbound handshake request awaiting a response.
     HandshakeReceived {
         peer: PeerId,

@@ -23,6 +23,7 @@ bincode     = { workspace = true, features = ["serde"] }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
 uuid        = { workspace = true }
+rand        = { workspace = true }
 
 libp2p = { workspace = true, features = [
     "tokio",
@@ -39,6 +40,7 @@ libp2p = { workspace = true, features = [
     "kad",
     "dns",
     "relay",
+    "autonat",
     "dcutr",
 ] }
 

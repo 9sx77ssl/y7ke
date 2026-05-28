@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.64] — 2026-05-28
+
+- feat(net): V2-A3 AutoNAT v2 client + NatReachability verdict
+
 ## [0.1.63] — 2026-05-28
 
 - fix(net): identify push listen-addr updates

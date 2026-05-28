@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::id::ConversationId;
-use crate::status::{ConnectionKind, MessageStatus, RequestResolution};
+use crate::status::{ConnectionKind, MessageStatus, NatReachability, RequestResolution};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -62,6 +62,11 @@ pub enum AppEvent {
     /// User settings (dial modes / bootstrap list) were updated.
     SettingsChanged,
 
+    /// AutoNAT v2 verdict for our own external reachability changed.
+    /// Drives the connectivity-debug UI pill and the upgrade-from-relay
+    /// loop's "should we bother dialing direct?" decision.
+    NatStatusChanged { reachability: NatReachability },
+
     /// Operator-visible error surfaced from a background task.
     BackgroundError { message: String },
 }
@@ -78,6 +83,7 @@ impl AppEvent {
             AppEvent::MessageStatusChanged { .. } => "message_status_changed",
             AppEvent::PresenceChanged { .. } => "presence_changed",
             AppEvent::SettingsChanged => "settings_changed",
+            AppEvent::NatStatusChanged { .. } => "nat_status_changed",
             AppEvent::BackgroundError { .. } => "background_error",
         }
     }

@@ -59,6 +59,23 @@ pub enum ConnectionKind {
     Relayed,
 }
 
+/// AutoNAT v2 reachability verdict.
+///
+/// `Unknown` until the first probe lands; flips to `Public` if any tested
+/// external address comes back reachable, `Private` if every probe failed.
+/// Drives the upgrade-from-relay loop: when `Public`, DCUtR retries fire
+/// eagerly; when `Private` they wait for a verdict change to avoid burning
+/// packets.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
+pub enum NatReachability {
+    Public,
+    Private,
+    #[default]
+    Unknown,
+}
+
 /// State of a pending contact request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

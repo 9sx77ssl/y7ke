@@ -69,6 +69,25 @@ pub(crate) struct AppInner {
     /// Last-known ping state per bootstrap multiaddr (keyed by the full
     /// multiaddr string). Empty at boot — populated by `ping_all_bootstraps`.
     pub bootstrap_pings: tokio::sync::RwLock<HashMap<String, BootstrapPingState>>,
+    /// AutoNAT v2 aggregate reachability verdict. Populated by event_loop
+    /// rolling individual probe results into a verdict with a small
+    /// flap-resistance window (≥3 failures before downgrading from
+    /// Public). Drives the connectivity-debug UI pill and the
+    /// upgrade-from-relay loop.
+    pub nat_status: tokio::sync::RwLock<NatStatusState>,
+}
+
+/// Aggregate state derived from AutoNAT v2 probe results.
+///
+/// `verdict` starts `Unknown`; flips to `Public` on any reachable probe,
+/// or to `Private` after enough consecutive failures (see
+/// `event_loop::handle_nat_status` for the precise FSM). UI reads
+/// `verdict` exclusively; `consecutive_failures` is internal flap
+/// suppression.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NatStatusState {
+    pub verdict: y7ke_core::NatReachability,
+    pub consecutive_failures: u32,
 }
 
 pub struct AppHandle {
@@ -111,6 +130,7 @@ impl AppHandle {
             connection_kinds: tokio::sync::RwLock::new(HashMap::new()),
             rate_limiter: RateLimiter::default_limits(),
             bootstrap_pings: tokio::sync::RwLock::new(HashMap::new()),
+            nat_status: tokio::sync::RwLock::new(NatStatusState::default()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);

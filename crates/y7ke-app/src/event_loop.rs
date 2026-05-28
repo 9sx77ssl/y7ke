@@ -155,6 +155,11 @@ async fn dispatch(
             request,
             channel,
         } => handle_sync(inner, peer, request, channel).await,
+        NetEvent::NatStatus {
+            tested_addr,
+            server,
+            reachable,
+        } => handle_nat_status(inner, event_tx, tested_addr, server, reachable).await,
         NetEvent::Error { message } => {
             // Routine swarm errors (Kad maintenance dial-fails to
             // long-dead local addrs) come through here; user-actionable
@@ -163,6 +168,50 @@ async fn dispatch(
             Ok(())
         }
     }
+}
+
+/// Roll a single AutoNAT v2 probe result into `AppInner::nat_status` and
+/// emit `AppEvent::NatStatusChanged` only when the aggregate verdict
+/// actually flips. Any successful probe pushes us to `Public`; an
+/// initially-`Unknown` peer that sees only failures within a short
+/// window settles to `Private`; outright transitions away from `Public`
+/// require >=3 consecutive failures to avoid flapping on a single
+/// dropped probe.
+async fn handle_nat_status(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    tested_addr: libp2p::Multiaddr,
+    server: PeerId,
+    reachable: bool,
+) -> Result<()> {
+    let mut state = inner.nat_status.write().await;
+    let previous = state.verdict;
+    if reachable {
+        state.verdict = y7ke_core::NatReachability::Public;
+        state.consecutive_failures = 0;
+    } else {
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        // Unknown → Private on the first failure (give the user feedback
+        // quickly). Public → Private only after 3 in a row to ride out a
+        // single dropped probe. Either tier yields the same Private
+        // verdict; the conditions differ in *when* we apply it.
+        let unknown_first_miss = state.verdict == y7ke_core::NatReachability::Unknown;
+        let public_triple_miss = state.verdict == y7ke_core::NatReachability::Public
+            && state.consecutive_failures >= 3;
+        if unknown_first_miss || public_triple_miss {
+            state.verdict = y7ke_core::NatReachability::Private;
+        }
+    }
+    let now = state.verdict;
+    drop(state);
+
+    tracing::debug!(%tested_addr, %server, reachable, ?previous, ?now, "autonat: probe absorbed");
+
+    if previous != now {
+        tracing::info!(?previous, ?now, "autonat: verdict changed");
+        let _ = event_tx.send(AppEvent::NatStatusChanged { reachability: now });
+    }
+    Ok(())
 }
 
 async fn handle_handshake(

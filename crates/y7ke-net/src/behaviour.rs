@@ -7,13 +7,14 @@
 use std::time::Duration;
 
 use libp2p::{
-    dcutr, identify,
+    autonat, dcutr, identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
     mdns, ping, relay,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
 };
+use rand::rngs::OsRng;
 
 use crate::protocol::{
     HandshakeReq, HandshakeResp, MsgReq, MsgResp, SyncReq, SyncResp, HANDSHAKE_PROTOCOL,
@@ -56,6 +57,12 @@ pub struct Y7Behaviour {
     /// XX with the same Ed25519 keypair, so the libp2p PeerId still
     /// matches — no app-layer revalidation is required.
     pub dcutr: dcutr::Behaviour,
+    /// AutoNAT v2 client — V2-A3. Asks peers (bootstrap nodes act as
+    /// servers) to dial us back over a fresh outbound socket; positive
+    /// responses confirm an external address as reachable. Drives the
+    /// upgrade-from-relay loop's "should we bother trying direct?"
+    /// decision — see `docs/V2_GLOBAL_NETWORKING_PLAN.md` §2 and §8.
+    pub autonat_client: autonat::v2::client::Behaviour<OsRng>,
 }
 
 impl Y7Behaviour {
@@ -130,6 +137,9 @@ impl Y7Behaviour {
 
         let dcutr = dcutr::Behaviour::new(local_peer_id);
 
+        let autonat_client =
+            autonat::v2::client::Behaviour::new(OsRng, autonat::v2::client::Config::default());
+
         Ok(Self {
             identify,
             ping,
@@ -140,6 +150,7 @@ impl Y7Behaviour {
             kad,
             relay_client,
             dcutr,
+            autonat_client,
         })
     }
 }
