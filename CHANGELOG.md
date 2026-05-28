@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.79] — 2026-05-28
+
+- test(net): symmetric-NAT DCUtR fallback sim + Y7KE_HOLD_SECS (Phase 3.4)
+
 ## [0.1.78] — 2026-05-28
 
 - fix(net): prune circuit addrs from the address book on LanOnly (audit B#3)

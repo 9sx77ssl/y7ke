@@ -762,7 +762,8 @@ beyond existing transitions.
 | `v2_sync_reconcile.rs` (sync via mDNS) | ✓ | unchanged |
 | sync via /p2p-circuit | ✓ folded into `four_node_relay.rs` (Phase 3.1) | extend with offline-queue drain |
 | `autonat_smoke.rs` (AutoNAT verdict) | — | **new — Phase 2 step 2** |
-| netns NAT sim (relay-required / blocked-path case) | ✓ `scripts/nat-sim/run.sh` + `nat_sim_node` example | add full-cone iptables variant for DCUtR-success |
+| netns NAT sim — blocked path (relay required) | ✓ `scripts/nat-sim/run.sh` + `nat_sim_node` | — |
+| netns NAT sim — symmetric NAT (DCUtR fallback) | ✓ `scripts/nat-sim/run-symmetric.sh` | — |
 | `v2_transport_migration.rs` (IP change → QUIC migration) | — | **new — Phase 3 step 12** |
 | `live_relay_smoke` (live VPS) | ✓ TCP | extend with QUIC variant — Phase 2 step 5 |
 | **manual cross-network smoke** | — | **new — Phase 3 step 13, captured in this doc as ground truth** |
@@ -773,6 +774,21 @@ get attached to this doc post-execution as the artefact that says
 "yes, real-world direct-first works", or, failing that, names the
 specific NAT class that forced relay and the upgrade-loop attempt
 history.
+
+**netns NAT-sim finding (2026-05-28).** The local netns harness proved
+the relay-fallback path under both *blocked-path* (`run.sh`) and
+*symmetric-NAT* (`run-symmetric.sh`) conditions: DCUtR fires with the
+correct identify-observed mapped addresses on both sides, fails to
+punch, and the relay connection survives intact — the "stable relay
+beats reconnect chaos" invariant holds. Notably **stock Linux
+iptables/nftables `MASQUERADE` cannot simulate a full-cone (endpoint-
+independent) NAT**: conntrack shows the same client UDP port mapping to
+*different* external ports per destination (one toward the relay, another
+toward the peer) — i.e. it behaves as a symmetric NAT, which DCUtR is
+documented to be unable to punch. A true full-cone sim would require the
+out-of-tree `FULLCONENAT` kernel module. The DCUtR *success* path is
+therefore validated by the loopback `v2_dcutr_smoke.rs`; an end-to-end
+NAT hole-punch must be confirmed by the real-world cross-network smoke.
 
 ---
 

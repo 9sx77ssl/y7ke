@@ -203,9 +203,15 @@ async fn run_initiator(net: NetHandle) -> ! {
 
     if handshake_ok {
         println!("HANDSHAKE_OK");
-        // Give DCUtR a brief window to attempt an upgrade so the script
-        // can observe whether the path went Relayed→Direct.
-        tokio::time::sleep(Duration::from_secs(8)).await;
+        // Hold open so DCUtR has time to attempt a relay→direct upgrade
+        // (both peers must stay live during the simultaneous open). The
+        // full-cone NAT sim sets a longer Y7KE_HOLD_SECS than the
+        // blocked-path sim, which only needs to confirm Relayed.
+        let hold = env::var("Y7KE_HOLD_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8);
+        tokio::time::sleep(Duration::from_secs(hold)).await;
         std::process::exit(0);
     } else {
         let _ = kind_task.await;
