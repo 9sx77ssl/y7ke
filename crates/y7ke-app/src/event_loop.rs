@@ -452,8 +452,14 @@ async fn handle_sync(
                     .messages()
                     .pull_after(&expected, since_id, limit as i64)
                     .await?;
+                // Only stream back rows WE signed (outbound from us to the
+                // requester). pull_after returns the whole conversation; if
+                // we echo the requester's own envelopes back, their
+                // `ingest_synced_envelope` rejects them with "signed by
+                // wrong key" and they pollute the receiver log.
                 let envelopes: Vec<MessageEnvelope> = rows
                     .into_iter()
+                    .filter(|m| m.sender_pub == inner.my_pubkey)
                     .map(|m| MessageEnvelope {
                         message_id: *m.message_id.as_bytes(),
                         sender_pub: m.sender_pub,
