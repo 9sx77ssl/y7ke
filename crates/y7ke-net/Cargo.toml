@@ -27,6 +27,7 @@ uuid        = { workspace = true }
 libp2p = { workspace = true, features = [
     "tokio",
     "tcp",
+    "quic",
     "noise",
     "yamux",
     "mdns",

@@ -41,6 +41,7 @@ pub use protocol::{
 pub use swarm::{
     build_swarm, libp2p_keypair_from_y7_secret, multiaddr_is_lan, peer_id_from_y7, spawn_swarm,
     spawn_swarm_with_bootstraps, y7_id_from_peer_id, DEFAULT_BOOTSTRAPS, DEFAULT_LISTEN_ADDR,
+    DEFAULT_QUIC_LISTEN_ADDR,
 };
 
 // Re-export the libp2p types the public API exposes, so downstream

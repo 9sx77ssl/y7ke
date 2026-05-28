@@ -45,8 +45,12 @@ pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo",
 ];
 
-/// Default listen address (random TCP port on all interfaces).
+/// Default TCP listen address (random port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
+
+/// Default QUIC (v1) listen address (random UDP port on all interfaces).
+/// V2-A6 — bound in parallel with the TCP listener.
+pub const DEFAULT_QUIC_LISTEN_ADDR: &str = "/ip4/0.0.0.0/udp/0/quic-v1";
 
 /// Idle connection timeout. Connections with no active substream are
 /// dropped after this period.
@@ -79,6 +83,9 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
             yamux::Config::default,
         )
         .map_err(|e| AppError::network(format!("tcp/noise/yamux setup: {e}")))?
+        // V2-A6: QUIC alongside TCP. libp2p-quic provides its own Noise +
+        // muxer, so no upgrade closures are needed here.
+        .with_quic()
         .with_dns()
         .map_err(|e| AppError::network(format!("dns transport setup: {e}")))?
         .with_relay_client(noise::Config::new, yamux::Config::default)
@@ -125,6 +132,18 @@ pub fn spawn_swarm_with_bootstraps(
         warn!("failed to start listener on {DEFAULT_LISTEN_ADDR}: {e}");
         let _ = event_tx.send(NetEvent::Error {
             message: format!("listen_on({DEFAULT_LISTEN_ADDR}) failed: {e}"),
+        });
+    }
+    // V2-A6: bind QUIC in parallel. Best-effort — if UDP/0 fails (e.g.
+    // sandbox without UDP), TCP remains operational.
+    if let Err(e) = swarm.listen_on(
+        DEFAULT_QUIC_LISTEN_ADDR
+            .parse()
+            .expect("compile-time constant multiaddr"),
+    ) {
+        warn!("failed to start listener on {DEFAULT_QUIC_LISTEN_ADDR}: {e}");
+        let _ = event_tx.send(NetEvent::Error {
+            message: format!("listen_on({DEFAULT_QUIC_LISTEN_ADDR}) failed: {e}"),
         });
     }
 
