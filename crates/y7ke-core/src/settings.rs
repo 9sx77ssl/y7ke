@@ -13,20 +13,21 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_RELAY_BOOTSTRAP: &str =
     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo";
 
-/// Mutually-exclusive dial strategy. UI picks one via radio buttons.
+/// Dial strategy. Two modes: LAN-only, or the full "Y7net" path. The
+/// former `P2p` variant was a behavioural duplicate of `Internet` (same
+/// dial chain; DCUtR runs automatically regardless of mode), so it was
+/// removed. Legacy `"P2p"` settings rows are rewritten to `Internet` by
+/// migration 0006.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum DialMode {
     /// LAN-only. mDNS + cached LAN-only addrs. No Kad provider record,
     /// no bootstrap dial, no `/p2p-circuit` listen.
     LanOnly,
-    /// Bootstrap-assisted: Kad lookup + direct dial first, circuit-relay-v2
-    /// fallback when direct fails.
+    /// Full mode ("Y7net" in the UI): Kad lookup + direct dial (with
+    /// automatic DCUtR hole-punch upgrade) and circuit-relay-v2 fallback.
     #[default]
     Internet,
-    /// P2P (UI-visible stub for V2-A5 DCUtR). Currently identical to
-    /// Internet plus a one-shot info log per dial.
-    P2p,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, ts_rs::TS)]

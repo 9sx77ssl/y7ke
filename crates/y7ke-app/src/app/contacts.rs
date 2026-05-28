@@ -91,9 +91,6 @@ impl AppHandle {
     /// - `Internet`: all 4 steps. Step 3 (Kad) returns relay
     ///   multiaddrs naturally; direct dial preferred via
     ///   `sort_addrs_for_dial`.
-    /// - `P2p`: identical dial chain to `Internet` today. DCUtR runs
-    ///   automatically at the swarm level on any relayed connection
-    ///   regardless of mode, so there is no separate P2p dial path yet.
     async fn dial_with_discovery(&self, peer: Y7Id) {
         let mode = match self.inner.db.settings().get().await {
             Ok(s) => s.dial_mode,
@@ -103,13 +100,6 @@ impl AppHandle {
             }
         };
         tracing::info!(%peer, ?mode, "discovery: starting chain");
-
-        if matches!(mode, y7ke_core::settings::DialMode::P2p) {
-            // P2p shares the Internet dial chain today; DCUtR runs
-            // automatically (swarm-level) on any relayed connection
-            // regardless of mode, so there's no separate P2p dial path yet.
-            tracing::info!("p2p mode: using internet dial chain; dcutr upgrade is automatic on relayed links");
-        }
 
         let lan_only = matches!(mode, y7ke_core::settings::DialMode::LanOnly);
 
@@ -416,7 +406,7 @@ impl AppHandle {
 /// Filter addresses by the current `DialMode`.
 ///
 /// - `LanOnly` → keep LAN-only addrs.
-/// - `Internet` / `P2p` → keep everything; ordering is decided by
+/// - `Internet` → keep everything; ordering is decided by
 ///   `y7ke_net::sort_addrs_for_dial` at the caller.
 fn filter_addrs_for_mode(
     addrs: Vec<libp2p::Multiaddr>,
@@ -428,7 +418,7 @@ fn filter_addrs_for_mode(
             .into_iter()
             .filter(y7ke_net::multiaddr_is_lan)
             .collect(),
-        DialMode::Internet | DialMode::P2p => addrs,
+        DialMode::Internet => addrs,
     }
 }
 

@@ -46,7 +46,7 @@ async fn dial_mode_round_trips_through_settings() {
     let s0 = app.get_settings().await.unwrap();
     assert_eq!(s0.dial_mode, DialMode::Internet);
 
-    for mode in [DialMode::LanOnly, DialMode::P2p, DialMode::Internet] {
+    for mode in [DialMode::LanOnly, DialMode::Internet] {
         app.update_settings(Settings {
             dial_mode: mode,
             extra_bootstraps: vec![],

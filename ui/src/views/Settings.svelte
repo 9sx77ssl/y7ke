@@ -100,9 +100,7 @@
       case "LanOnly":
         return "lan only — peers must be on the same wifi network";
       case "Internet":
-        return "internet — finds peers through a bootstrap server, falls back to relay when direct dial fails";
-      case "P2p":
-        return "p2p — direct-first. relayed links automatically attempt a dcutr hole-punch upgrade to a direct path (same dial chain as internet today; real-nat punch success varies by nat type, relay stays as fallback)";
+        return "Y7net — the normal mode: finds people over the internet, connects directly when it can (auto hole-punch), and relays through the bootstrap server when it can't";
     }
   }
 
@@ -277,8 +275,7 @@
 
   const MODES: { value: DialMode; label: string }[] = [
     { value: "LanOnly", label: "lan only" },
-    { value: "Internet", label: "internet" },
-    { value: "P2p", label: "p2p" },
+    { value: "Internet", label: "Y7net" },
   ];
 </script>
 

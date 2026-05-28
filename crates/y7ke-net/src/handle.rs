@@ -310,7 +310,7 @@ impl NetHandle {
     }
 
     /// Switch the swarm to a new `DialMode` immediately. `LanOnly` drops
-    /// circuit listeners + disconnects bootstraps; `Internet`/`P2p`
+    /// circuit listeners + disconnects bootstraps; `Internet`
     /// re-dial bootstraps and re-request relay reservations on connect.
     pub async fn apply_dial_mode(&self, mode: DialMode) -> Result<(), AppError> {
         self.cmd_tx
@@ -422,7 +422,7 @@ pub enum NetCommand {
     },
     /// Switch the live `DialMode`. Triggers immediate side-effects:
     /// `LanOnly` drops `/p2p-circuit` listeners + disconnects bootstraps;
-    /// `Internet`/`P2p` re-enable bootstrap reconnect and relay reservations.
+    /// `Internet` re-enable bootstrap reconnect and relay reservations.
     ApplyDialMode { mode: DialMode },
     /// Stop the swarm task.
     Shutdown,

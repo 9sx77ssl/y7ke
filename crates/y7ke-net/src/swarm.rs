@@ -607,7 +607,7 @@ fn handle_command(
                     swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Client));
                     state.provided_self = false;
                 }
-                DialMode::Internet | DialMode::P2p => {
+                DialMode::Internet => {
                     // Re-enable Kad advertising; routing-updated will
                     // start_providing again next time it fires.
                     swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Server));
