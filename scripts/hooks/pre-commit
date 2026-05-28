@@ -24,4 +24,35 @@ sed -i -E "s/\"version\": \"$current\"/\"version\": \"$next\"/" ui/package.json
 
 git add Cargo.toml src-tauri/tauri.conf.json ui/package.json
 
+# Prepend a CHANGELOG entry now, while we're still in pre-commit — the
+# index is re-snapshotted from here. prepare-commit-msg runs after the
+# snapshot, so anything staged there ends up in the *next* commit instead
+# of this one (which is how GitHub release notes ended up empty for
+# every tag — the entry always arrived one commit late).
+today=$(date +%Y-%m-%d)
+subject=""
+if [ -f .git/COMMIT_EDITMSG ]; then
+  subject=$(grep -m1 -vE '^(#|$)' .git/COMMIT_EDITMSG || true)
+fi
+[ -z "$subject" ] && subject="(no commit subject available)"
+
+entry="## [$next] — $today
+
+- $subject
+"
+
+if [ -f CHANGELOG.md ]; then
+  tmp=$(mktemp)
+  awk -v entry="$entry" '
+    BEGIN { inserted = 0 }
+    /^## \[/ && !inserted { print entry; inserted = 1 }
+    { print }
+    END { if (!inserted) print entry }
+  ' CHANGELOG.md > "$tmp"
+  mv "$tmp" CHANGELOG.md
+else
+  printf "# Changelog\n\n%s" "$entry" > CHANGELOG.md
+fi
+git add CHANGELOG.md
+
 echo "[pre-commit] $current → $next"

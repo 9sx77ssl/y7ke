@@ -1,45 +1,8 @@
 #!/usr/bin/env bash
-# Prepend a CHANGELOG.md entry for the new version with the commit subject.
-# Runs after pre-commit (which bumped versions), before the editor opens.
-set -euo pipefail
-
-msg_file="$1"
-source_arg="${2:-}"
-
-# Skip for merge/squash/amend — those re-use existing entries.
-case "$source_arg" in
-  merge|squash|commit) exit 0 ;;
-esac
-
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
-
-# Read the now-current version (set by pre-commit).
-version=$(grep '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-today=$(date +%Y-%m-%d)
-
-# First non-comment, non-empty line is the subject.
-subject=$(grep -m1 -vE '^(#|$)' "$msg_file" || true)
-[ -z "$subject" ] && exit 0
-
-entry="## [$version] — $today
-
-- $subject
-"
-
-if [ -f CHANGELOG.md ]; then
-  # Insert right above the first existing version section so the newest
-  # entry stays on top of the version list (under the title + preamble).
-  tmp=$(mktemp)
-  awk -v entry="$entry" '
-    BEGIN { inserted = 0 }
-    /^## \[/ && !inserted { print entry; inserted = 1 }
-    { print }
-    END { if (!inserted) print entry }
-  ' CHANGELOG.md > "$tmp"
-  mv "$tmp" CHANGELOG.md
-else
-  printf "# Changelog\n\n%s" "$entry" > CHANGELOG.md
-fi
-
-git add CHANGELOG.md
+# Historical: this hook used to prepend CHANGELOG.md entries with the
+# bumped version. That ran AFTER the index snapshot, so the entry landed
+# in the NEXT commit and every GitHub release tag rendered without notes.
+# The entry is now written from pre-commit instead; this hook is a no-op
+# kept only because scripts/hooks/install or `git config core.hooksPath`
+# may still reference it. Safe to delete in a follow-up.
+exit 0
