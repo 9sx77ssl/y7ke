@@ -90,6 +90,13 @@ impl RateLimiter {
         let entry = g.entry(peer).or_default();
         entry.sync.try_consume(limit, Instant::now())
     }
+
+    /// Drop a peer's buckets once it has fully disconnected, so the map
+    /// stays proportional to currently-active peers rather than every
+    /// PeerId ever seen. A reconnect lazily recreates the entry.
+    pub async fn forget(&self, peer: PeerId) {
+        self.inner.lock().await.remove(&peer);
+    }
 }
 
 #[cfg(test)]

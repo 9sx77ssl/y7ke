@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.85] — 2026-05-28
+
+- fix(net+app): bound unbounded per-peer growth (audit stale-leak)
+
 ## [0.1.84] — 2026-05-28
 
 - fix(app+storage): three sync-reconcile reliability bugs

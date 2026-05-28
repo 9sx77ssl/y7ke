@@ -57,9 +57,12 @@ async fn dispatch(
         NetEvent::PeerDiscovered { peer, addrs, y7_id } => {
             tracing::debug!(peer = %peer, addrs = ?addrs, y7_id = ?y7_id, "peer discovered");
             if let Some(y7) = y7_id {
-                // V2-A1: persist the addr list so future dials can take
-                // the cache fast path instead of waiting on Kad lookup.
-                if !addrs.is_empty() {
+                // V2-A1: persist the addr list so future dials can take the
+                // cache fast path instead of waiting on Kad lookup. Only for
+                // known contacts — the dial cache is consulted only for
+                // contact dial targets, so caching every DHT-surfaced
+                // stranger would just accumulate peer_state rows forever.
+                if !addrs.is_empty() && inner.db.contacts().get(&y7).await?.is_some() {
                     let strs: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
                     if let Ok(json) = serde_json::to_string(&strs) {
                         let _ = inner.db.peer_state().upsert_seen(&y7, Some(json)).await;
@@ -173,20 +176,32 @@ async fn dispatch(
                 // Remove only the connection that closed, then recompute
                 // presence from any survivors. A relay circuit dropping
                 // must never blank a still-live LAN/direct path.
-                {
+                let fully_gone = {
                     let mut conns = inner.connections.write().await;
                     if let Some(by_id) = conns.get_mut(&y7) {
                         by_id.remove(&connection_id);
                         if by_id.is_empty() {
                             conns.remove(&y7);
+                            true
+                        } else {
+                            false
                         }
+                    } else {
+                        true
                     }
-                }
+                };
                 // Reset the upgrade-from-relay backoff: if this was a
                 // direct path dropping back to relay we want to retry the
                 // upgrade aggressively again, and a flapping relay peer
                 // must not inherit a stale high attempt count on reconnect.
                 inner.upgrade_backoff.write().await.remove(&y7);
+                // Peer fully disconnected — drop its rate-limiter buckets
+                // so the limiter map stays proportional to active peers,
+                // not every PeerId ever seen (recreated lazily on
+                // reconnect).
+                if fully_gone {
+                    inner.rate_limiter.forget(peer).await;
+                }
                 let best = crate::app::refresh_presence(inner, y7).await;
                 tracing::debug!(%y7, ?best, "connection closed → presence recomputed");
                 let _ = event_tx.send(AppEvent::PresenceChanged {

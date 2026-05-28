@@ -337,11 +337,19 @@ struct TaskState {
     dial_mode: DialMode,
 }
 
+/// Max cached dial addresses per peer. A peer rotating ephemeral source
+/// ports would otherwise grow its address_book Vec without bound; keep
+/// the most-recently-learned few (direct QUIC/TCP + a circuit is plenty).
+const MAX_ADDRS_PER_PEER: usize = 16;
+
 impl TaskState {
     fn remember_address(&mut self, peer: PeerId, addr: Multiaddr) {
         let entry = self.address_book.entry(peer).or_default();
         if !entry.contains(&addr) {
             entry.push(addr);
+            if entry.len() > MAX_ADDRS_PER_PEER {
+                entry.remove(0);
+            }
         }
     }
 }
@@ -698,6 +706,13 @@ async fn handle_swarm_event(
                     // against the rare case where it lingers.
                     swarm.remove_listener(lid);
                 }
+            } else if !swarm.is_connected(&peer_id) {
+                // Non-bootstrap peer fully disconnected: drop its dial
+                // cache so address_book doesn't accumulate an entry for
+                // every peer ever surfaced by DHT/identify churn. It's an
+                // L1 cache only — contacts re-dial from the peer_state DB
+                // cache + a Kad lookup.
+                state.address_book.remove(&peer_id);
             }
             emit(
                 event_tx,
