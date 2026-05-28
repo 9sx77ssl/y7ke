@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.52] — 2026-05-28
+
+- feat(app): direct-first dial priority
+
 ## [0.1.51] — 2026-05-28
 
 - feat(net): DCUtR behaviour (V2-A5)
