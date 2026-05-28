@@ -299,6 +299,7 @@
         class="pills"
         role="radiogroup"
         aria-label="connection mode"
+        tabindex="-1"
         bind:this={pillsEl}
         onkeydown={onPillsKey}
       >

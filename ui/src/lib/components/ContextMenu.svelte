@@ -28,6 +28,42 @@
     close();
     item.onClick();
   }
+
+  // Focus the first enabled item when the menu opens so it's keyboard-usable.
+  function focusFirst(node: HTMLElement) {
+    requestAnimationFrame(() =>
+      node.querySelector<HTMLButtonElement>("button.item:not(:disabled)")?.focus(),
+    );
+  }
+
+  // Roving arrow-key navigation between menu items.
+  function onMenuKey(e: KeyboardEvent) {
+    const ul = e.currentTarget as HTMLElement;
+    const btns = Array.from(
+      ul.querySelectorAll<HTMLButtonElement>("button.item:not(:disabled)"),
+    );
+    if (btns.length === 0) return;
+    const cur = btns.indexOf(document.activeElement as HTMLButtonElement);
+    let next = cur;
+    switch (e.key) {
+      case "ArrowDown":
+        next = cur < 0 ? 0 : (cur + 1) % btns.length;
+        break;
+      case "ArrowUp":
+        next = cur <= 0 ? btns.length - 1 : cur - 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = btns.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    btns[next]?.focus();
+  }
 </script>
 
 <svelte:window
@@ -39,10 +75,13 @@
   <ul
     class="menu"
     role="menu"
+    tabindex="-1"
     style:left="{x}px"
     style:top="{y}px"
     onclick={(e) => e.stopPropagation()}
+    onkeydown={onMenuKey}
     oncontextmenu={(e) => e.preventDefault()}
+    use:focusFirst
   >
     {#each items as item}
       <li>
