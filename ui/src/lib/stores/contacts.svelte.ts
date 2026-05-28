@@ -5,6 +5,7 @@ import { deleteContact as rpcDelete, listContacts } from "../bridge";
 import type { ContactView } from "../types";
 import { log } from "../log";
 import { seedPresence } from "./presence.svelte";
+import { eventState } from "./events.svelte";
 
 const logger = log("contacts");
 
@@ -58,11 +59,18 @@ export async function refreshContacts(): Promise<void> {
   if (state.loading) return;
   state.loading = true;
   state.error = null;
+  // Snapshot the presence generation before the await. If a live
+  // PresenceChanged arrives during the fetch, this list_contacts snapshot is
+  // already stale for presence — a live event is newer and must win, so we
+  // skip re-seeding and let the next (debounced) resync settle it.
+  const presenceGen = eventState.presenceRev;
   try {
     const items = await listContacts();
     state.items = items;
     state.loadedOnce = true;
-    seedPresence(items);
+    if (eventState.presenceRev === presenceGen) {
+      seedPresence(items);
+    }
   } catch (err) {
     state.error = err instanceof Error ? err.message : String(err);
   } finally {

@@ -8,6 +8,7 @@
     refreshContacts,
   } from "../lib/stores/contacts.svelte";
   import { refreshRequests, requests } from "../lib/stores/requests.svelte";
+  import { eventState } from "../lib/stores/events.svelte";
   import { getPresence, presenceLabel } from "../lib/stores/presence.svelte";
   import {
     openAddContact,
@@ -82,6 +83,20 @@
   $effect(() => {
     if (!contacts.loadedOnce && !contacts.loading) void refreshContacts();
     if (!requests.loadedOnce && !requests.loading) void refreshRequests();
+  });
+
+  // Self-heal the presence cache. The 256-slot backend broadcast can drop
+  // PresenceChanged events under a reconnect storm, which would strand the
+  // sidebar dot on a stale value (the Connectivity pane self-heals by
+  // polling, so the two would disagree). presenceRev bumps on every event
+  // that DID arrive; debounce a re-pull of authoritative presence so the dot
+  // converges within a window of any churn. refreshContacts is gen-guarded,
+  // so this can't clobber a fresher in-flight event.
+  $effect(() => {
+    const _rev = eventState.presenceRev;
+    void _rev;
+    const id = setTimeout(() => void refreshContacts(), 250);
+    return () => clearTimeout(id);
   });
 
   function isOpen(y7Id: string): boolean {

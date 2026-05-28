@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.93] — 2026-05-28
+
+- fix(ui): self-heal presence so the sidebar dot can't strand stale
+
 ## [0.1.92] — 2026-05-28
 
 - fix(ui): frameless window resize was completely dead + reclaim top edge
