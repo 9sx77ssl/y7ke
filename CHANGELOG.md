@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.74] — 2026-05-28
+
+- fix(app): skip stale (>24h) cached circuit addrs in discovery
+
 ## [0.1.73] — 2026-05-28
 
 - fix(app): bound the relay→direct upgrade retry to burst-then-periodic

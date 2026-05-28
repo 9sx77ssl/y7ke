@@ -135,8 +135,21 @@ impl AppHandle {
         if let Ok(Some(state)) = self.inner.db.peer_state().get(&peer).await {
             if let Some(json) = state.last_addrs_json {
                 if let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) {
-                    let parsed: Vec<libp2p::Multiaddr> =
-                        addrs.iter().filter_map(|s| s.parse().ok()).collect();
+                    // Drop cached circuit (relay) addrs from rows we
+                    // haven't refreshed in over 24h: a decommissioned
+                    // relay would otherwise have us dialing a dead
+                    // /p2p-circuit path on every discovery forever. Direct
+                    // addrs are kept (cheap to try) and Kad re-resolves
+                    // the rest below.
+                    let stale = circuit_cache_is_stale(state.last_seen_at, now_unix_ms());
+                    if stale {
+                        tracing::debug!(%peer, "discovery: step 2 — dropping stale (>24h) circuit addrs");
+                    }
+                    let parsed: Vec<libp2p::Multiaddr> = addrs
+                        .iter()
+                        .filter(|s| !(stale && s.contains("/p2p-circuit")))
+                        .filter_map(|s| s.parse().ok())
+                        .collect();
                     let prioritised = y7ke_net::sort_addrs_for_dial(parsed);
                     let filtered = filter_addrs_for_mode(prioritised, mode);
                     tracing::info!(%peer, count = filtered.len(), "discovery: step 2 — trying cached addrs");
@@ -414,5 +427,51 @@ fn filter_addrs_for_mode(
             .filter(y7ke_net::multiaddr_is_lan)
             .collect(),
         DialMode::Internet | DialMode::P2p => addrs,
+    }
+}
+
+/// Cached circuit (relay) addrs are treated as likely-dead once their
+/// `peer_state` row hasn't been refreshed for this long.
+const STALE_CIRCUIT_AGE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// True if a `peer_state.last_seen_at` (Unix ms) is older than the
+/// stale-circuit threshold relative to `now_ms`. A missing timestamp
+/// counts as stale — we can't prove the cached relay path is fresh.
+/// Pure for unit-testing.
+fn circuit_cache_is_stale(last_seen_at: Option<i64>, now_ms: i64) -> bool {
+    match last_seen_at {
+        Some(ts) => now_ms.saturating_sub(ts) > STALE_CIRCUIT_AGE_MS,
+        None => true,
+    }
+}
+
+fn now_unix_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn circuit_cache_staleness() {
+        let now = 100 * STALE_CIRCUIT_AGE_MS;
+        // Just-seen → fresh.
+        assert!(!circuit_cache_is_stale(Some(now), now));
+        // Seen 23h ago → still fresh.
+        assert!(!circuit_cache_is_stale(
+            Some(now - 23 * 60 * 60 * 1000),
+            now
+        ));
+        // Seen >24h ago → stale.
+        assert!(circuit_cache_is_stale(
+            Some(now - STALE_CIRCUIT_AGE_MS - 1),
+            now
+        ));
+        // No timestamp → stale.
+        assert!(circuit_cache_is_stale(None, now));
     }
 }
