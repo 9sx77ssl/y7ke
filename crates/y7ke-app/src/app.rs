@@ -315,6 +315,10 @@ pub(crate) fn best_conn(
 /// Recompute the `presence` + `connection_meta` derived caches for `y7`
 /// from the authoritative `connections` map and return the new best
 /// kind. Single place the two caches are written, so they can't desync.
+/// Offline *removes* the entries rather than storing an `Offline` row —
+/// otherwise a `ConnectionClosed` arriving after a contact was deleted
+/// would resurrect a ghost presence entry (absence already reads as
+/// Offline via `unwrap_or` at the call sites).
 pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKind {
     let (best, meta) = {
         let conns = inner.connections.read().await;
@@ -323,10 +327,11 @@ pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKi
             .map(best_conn)
             .unwrap_or((ConnectionKind::Offline, ConnectionMeta::default()))
     };
-    inner.presence.write().await.insert(y7, best);
     if matches!(best, ConnectionKind::Offline) {
+        inner.presence.write().await.remove(&y7);
         inner.connection_meta.write().await.remove(&y7);
     } else {
+        inner.presence.write().await.insert(y7, best);
         inner.connection_meta.write().await.insert(y7, meta);
     }
     best
