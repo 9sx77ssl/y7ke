@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use libp2p::{
     core::ConnectedPoint,
-    identify, identity, kad, mdns, noise, relay,
+    dcutr, identify, identity, kad, mdns, noise, relay,
     request_response::{self, OutboundRequestId},
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -594,9 +594,34 @@ async fn handle_swarm_event(
             handle_relay_client(event);
         }
 
+        SwarmEvent::Behaviour(Y7BehaviourEvent::Dcutr(event)) => {
+            handle_dcutr(event_tx, event);
+        }
+
         _ => {
             // Other variants (Dialing, IncomingConnection, ExternalAddr*, ...) are
             // not load-bearing in V1.
+        }
+    }
+}
+
+/// V2-A5: forward DCUtR upgrade outcomes to the app layer. On success
+/// the swarm has a fresh direct connection to the peer; on failure the
+/// existing relayed connection stays in place untouched.
+fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
+    match event.result {
+        Ok(_conn_id) => {
+            info!(peer = %event.remote_peer_id, "dcutr: direct upgrade succeeded");
+            emit(
+                event_tx,
+                NetEvent::ConnectionUpgraded {
+                    peer: event.remote_peer_id,
+                    kind: ConnectionKind::Direct,
+                },
+            );
+        }
+        Err(e) => {
+            info!(peer = %event.remote_peer_id, error = %e, "dcutr: direct upgrade failed (staying on relay)");
         }
     }
 }
