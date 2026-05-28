@@ -187,3 +187,13 @@ pub async fn ping_all_bootstraps(app: S<'_>) -> Result<Vec<BootstrapEntry>, Stri
 pub async fn select_best_bootstrap(app: S<'_>) -> Result<Option<String>, String> {
     Ok(app.get().await.select_best_bootstrap().await)
 }
+
+#[tauri::command]
+pub async fn get_dcutr_stats(app: S<'_>) -> Result<y7ke_core::DcutrStats, String> {
+    Ok(app.get().await.get_dcutr_stats())
+}
+
+#[tauri::command]
+pub async fn get_nat_status(app: S<'_>) -> Result<y7ke_core::NatReachability, String> {
+    Ok(app.get().await.get_nat_status().await)
+}

@@ -457,6 +457,13 @@ pub enum NetEvent {
     /// folds traffic over to the new direct path; the application layer
     /// should bump presence to `kind = Direct` immediately.
     ConnectionUpgraded { peer: PeerId, kind: ConnectionKind },
+    /// DCUtR upgrade failed (one of: peer didn't respond in time,
+    /// observed-address mismatch, both peers behind symmetric NAT, etc.).
+    /// The existing Relayed connection stays in place. The
+    /// upgrade-from-relay loop consumes this as a signal to schedule a
+    /// retry after the next observed-address change / AutoNAT verdict
+    /// flip.
+    ConnectionUpgradeFailed { peer: PeerId, error: String },
     /// AutoNAT v2 verdict — a tested external address either came back
     /// reachable or not. The app layer aggregates these into a single
     /// `NatReachability` per-app, used to gate the upgrade-from-relay

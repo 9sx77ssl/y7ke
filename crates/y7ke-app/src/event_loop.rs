@@ -104,6 +104,12 @@ async fn dispatch(
             // tier. Same code path as ConnectionEstablished; no queue
             // drain because the relay path already delivered any
             // in-flight messages.
+            inner
+                .dcutr_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            inner
+                .dcutr_successes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
                 inner.presence.write().await.insert(y7, kind);
                 tracing::info!(%y7, ?kind, "presence upgraded via DCUtR");
@@ -112,6 +118,16 @@ async fn dispatch(
                     connection: kind,
                 });
             }
+            Ok(())
+        }
+        NetEvent::ConnectionUpgradeFailed { peer, error } => {
+            inner
+                .dcutr_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            inner
+                .dcutr_failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::debug!(%peer, %error, "dcutr upgrade failed (stays on relay)");
             Ok(())
         }
         NetEvent::ConnectionClosed { peer } => {
@@ -196,8 +212,8 @@ async fn handle_nat_status(
         // single dropped probe. Either tier yields the same Private
         // verdict; the conditions differ in *when* we apply it.
         let unknown_first_miss = state.verdict == y7ke_core::NatReachability::Unknown;
-        let public_triple_miss = state.verdict == y7ke_core::NatReachability::Public
-            && state.consecutive_failures >= 3;
+        let public_triple_miss =
+            state.verdict == y7ke_core::NatReachability::Public && state.consecutive_failures >= 3;
         if unknown_first_miss || public_triple_miss {
             state.verdict = y7ke_core::NatReachability::Private;
         }

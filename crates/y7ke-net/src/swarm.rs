@@ -731,6 +731,13 @@ fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
         }
         Err(e) => {
             info!(peer = %event.remote_peer_id, error = %e, "dcutr: direct upgrade failed (staying on relay)");
+            emit(
+                event_tx,
+                NetEvent::ConnectionUpgradeFailed {
+                    peer: event.remote_peer_id,
+                    error: e.to_string(),
+                },
+            );
         }
     }
 }

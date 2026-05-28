@@ -75,6 +75,14 @@ pub(crate) struct AppInner {
     /// Public). Drives the connectivity-debug UI pill and the
     /// upgrade-from-relay loop.
     pub nat_status: tokio::sync::RwLock<NatStatusState>,
+    /// DCUtR upgrade counters — incremented by event_loop on every
+    /// NetEvent::ConnectionUpgraded / ConnectionUpgradeFailed. Read by
+    /// the Tauri `get_dcutr_stats` command for the Connectivity debug
+    /// pane. AtomicU64 so the Tauri command can read without acquiring
+    /// any RwLock.
+    pub dcutr_attempts: std::sync::atomic::AtomicU64,
+    pub dcutr_successes: std::sync::atomic::AtomicU64,
+    pub dcutr_failures: std::sync::atomic::AtomicU64,
 }
 
 /// Aggregate state derived from AutoNAT v2 probe results.
@@ -131,6 +139,9 @@ impl AppHandle {
             rate_limiter: RateLimiter::default_limits(),
             bootstrap_pings: tokio::sync::RwLock::new(HashMap::new()),
             nat_status: tokio::sync::RwLock::new(NatStatusState::default()),
+            dcutr_attempts: std::sync::atomic::AtomicU64::new(0),
+            dcutr_successes: std::sync::atomic::AtomicU64::new(0),
+            dcutr_failures: std::sync::atomic::AtomicU64::new(0),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);

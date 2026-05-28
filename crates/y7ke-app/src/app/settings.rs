@@ -19,6 +19,22 @@ impl AppHandle {
         self.inner.db.settings().get().await
     }
 
+    /// Snapshot the DCUtR upgrade counters. Cheap — atomic reads, no
+    /// allocation. UI calls this for the Connectivity pane stats line.
+    pub fn get_dcutr_stats(&self) -> y7ke_core::DcutrStats {
+        use std::sync::atomic::Ordering::Relaxed;
+        y7ke_core::DcutrStats {
+            attempts: self.inner.dcutr_attempts.load(Relaxed),
+            successes: self.inner.dcutr_successes.load(Relaxed),
+            failures: self.inner.dcutr_failures.load(Relaxed),
+        }
+    }
+
+    /// Current aggregate AutoNAT v2 reachability verdict.
+    pub async fn get_nat_status(&self) -> y7ke_core::NatReachability {
+        self.inner.nat_status.read().await.verdict
+    }
+
     /// Persist `settings`, push the new bootstrap list to the swarm, apply
     /// any `dial_mode` change live, and emit `AppEvent::SettingsChanged`.
     pub async fn update_settings(&self, settings: Settings) -> Result<()> {

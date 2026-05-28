@@ -3,12 +3,14 @@
 //! Every other Y7KE crate depends on this one. Keep it small and stable.
 
 pub mod crypto;
+pub mod diagnostics;
 pub mod error;
 pub mod event;
 pub mod id;
 pub mod settings;
 pub mod status;
 
+pub use diagnostics::DcutrStats;
 pub use error::{AppError, Result};
 pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};
