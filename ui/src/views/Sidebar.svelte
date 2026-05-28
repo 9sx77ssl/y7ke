@@ -204,13 +204,19 @@
 
 <style>
   .sidebar {
+    /* Hard-locked width: floor + ceiling + no grow/shrink, so no content
+     * (a long label, an un-truncated sublabel) can ever push or collapse it.
+     * The sidebar is ALWAYS exactly --y7-sz-sidebar wide. */
     width: var(--y7-sz-sidebar);
-    flex-shrink: 0;
+    min-width: var(--y7-sz-sidebar);
+    max-width: var(--y7-sz-sidebar);
+    flex: 0 0 var(--y7-sz-sidebar);
     background: var(--y7-bg-sidebar);
     border-right: 1px solid var(--y7-border-subtle);
     display: flex;
     flex-direction: column;
     min-height: 0;
+    overflow: hidden;
   }
 
   .actions {

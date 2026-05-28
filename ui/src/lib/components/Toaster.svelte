@@ -23,6 +23,10 @@
     gap: var(--y7-sp-2);
     z-index: var(--y7-z-toast);
     pointer-events: none;
+    /* Cap the stack so wrapped long messages can't tower over the
+     * contacts list; older toasts scroll out of the clipped top. */
+    max-height: 40vh;
+    overflow: hidden;
   }
   .toast {
     pointer-events: auto;

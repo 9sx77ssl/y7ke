@@ -513,9 +513,9 @@
     border-color: rgba(239, 68, 68, 0.3);
   }
   .latency.tone-muted {
-    color: var(--y7-text-muted);
+    color: var(--y7-text-secondary);
     background: transparent;
-    border-color: var(--y7-border-subtle);
+    border-color: var(--y7-border-default);
   }
 
   .x {

@@ -105,6 +105,10 @@
   .modal {
     min-width: 320px;
     max-width: 480px;
+    /* Cap height so a long description can't push the footer buttons off
+     * a short window; the body scrolls, head/foot stay pinned. */
+    max-height: calc(100vh - var(--y7-sp-8) * 2);
+    overflow: hidden;
     background: var(--y7-bg-elevated);
     border: 1px solid var(--y7-border-default);
     border-radius: var(--y7-r-lg);
@@ -127,6 +131,8 @@
   }
   .body {
     padding: var(--y7-sp-4) var(--y7-sp-5);
+    overflow-y: auto;
+    min-height: 0;
   }
   .desc {
     margin: 0;

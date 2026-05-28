@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.88] — 2026-05-28
+
+- fix(ui): layout stability — resize-handle z-index, static sidebar, modal/toast caps
+
 ## [0.1.87] — 2026-05-28
 
 - fix(net): filter circuit addrs at dial time under LanOnly (B#3 complete)

@@ -348,9 +348,12 @@
     border-color: rgba(239, 68, 68, 0.3);
   }
   .tone-muted {
-    color: var(--y7-text-muted);
+    /* Legible-but-subtle: text-muted on a near-invisible border read as
+     * ~2:1 on the base bg (the 'tcp'/'default' pills looked washed out).
+     * Secondary text + default border keeps it monochrome yet readable. */
+    color: var(--y7-text-secondary);
     background: transparent;
-    border-color: var(--y7-border-subtle);
+    border-color: var(--y7-border-default);
   }
   .tone-info {
     color: var(--y7-blue);

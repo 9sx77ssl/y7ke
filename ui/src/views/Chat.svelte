@@ -212,6 +212,9 @@
     align-items: center;
     gap: var(--y7-sp-2);
     min-width: 0;
+    /* Never let the key block eat the whole header — leave the nickname
+     * at least half the width at small pane sizes. */
+    max-width: 45%;
   }
 
   .scroll {
@@ -260,11 +263,12 @@
     border-top: 1px solid var(--y7-border-subtle);
     background: var(--y7-bg-sidebar);
   }
-  /* Match the send button's height to the textarea's first-line height so
-     they line up flush. Textarea's auto-grow puts it above --y7-sz-btn-md. */
+  /* Pin the send button to the textarea's bottom line at a fixed control
+     height (Slack/Telegram convention) instead of stretching it into a tall
+     bar as the textarea auto-grows to maxRows. */
   .composer :global(.btn) {
-    height: auto;
-    align-self: stretch;
+    align-self: end;
+    height: var(--y7-sz-input);
     min-height: var(--y7-sz-input);
   }
 </style>

@@ -62,12 +62,17 @@
     overflow: hidden;
     display: flex;
     min-height: 0;
+    min-width: 0;
   }
 
-  /* Resize handles — invisible, 6px wide, positioned at window edges */
+  /* Resize handles — invisible, 6px wide, positioned at window edges.
+   * Must sit BELOW the modal overlay (500) and toasts (1000): at 9999 the
+   * edge strips intercepted mousedown near a dialog/scrollbar and started a
+   * window resize instead. 90 keeps them grabbable at the bare window border
+   * (titlebar/sidebar don't reach the outer 6px) without covering content. */
   .rz {
     position: fixed;
-    z-index: 9999;
+    z-index: 90;
   }
   .rz-n  { top: 0;    left: 6px;  right: 6px;  height: 6px; cursor: n-resize;  }
   .rz-s  { bottom: 0; left: 6px;  right: 6px;  height: 6px; cursor: s-resize;  }
