@@ -374,7 +374,18 @@ fn handle_command(
                     return;
                 }
             };
-            let addrs = state.address_book.get(&peer).cloned().unwrap_or_default();
+            let mut addrs = state.address_book.get(&peer).cloned().unwrap_or_default();
+            // Under LanOnly, never dial a /p2p-circuit (relay) address even
+            // if identify-push or Kad re-seeded one into the address book
+            // after the mode-transition prune. This is the dial-decision
+            // chokepoint, so it closes the LanOnly relay-dial leak fully
+            // (the transition-time prune alone left a re-population window).
+            if matches!(state.dial_mode, DialMode::LanOnly) {
+                addrs.retain(|a| {
+                    !a.iter()
+                        .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+                });
+            }
             if addrs.is_empty() {
                 debug!(%peer, "dial requested but no addresses known");
                 let _ = response_tx.send(Ok(false));
