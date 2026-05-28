@@ -54,7 +54,7 @@ impl<'db> SettingsDao<'db> {
 mod tests {
     use crate::db::{Db, DbConfig};
     use tempfile::TempDir;
-    use y7ke_core::settings::{DialModes, Settings};
+    use y7ke_core::settings::{DialMode, Settings};
 
     #[tokio::test]
     async fn round_trips_default_update_get() {
@@ -62,22 +62,17 @@ mod tests {
         let db = Db::open(DbConfig::in_dir(dir.path())).await.unwrap();
 
         let initial = db.settings().get().await.unwrap();
-        assert_eq!(initial.dial_modes, DialModes::default());
+        assert_eq!(initial.dial_mode, DialMode::default());
         assert!(initial.extra_bootstraps.is_empty());
 
         let updated = Settings {
-            dial_modes: DialModes {
-                lan: false,
-                internet: true,
-                relay: false,
-                p2p: true,
-            },
+            dial_mode: DialMode::LanOnly,
             extra_bootstraps: vec!["/ip4/127.0.0.1/tcp/9999/p2p/12D3KooWAaAaAaAa".into()],
         };
         db.settings().update(&updated).await.unwrap();
 
         let got = db.settings().get().await.unwrap();
-        assert_eq!(got.dial_modes, updated.dial_modes);
+        assert_eq!(got.dial_mode, updated.dial_mode);
         assert_eq!(got.extra_bootstraps, updated.extra_bootstraps);
     }
 }
