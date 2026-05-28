@@ -2,9 +2,9 @@
   import { toast } from "./toast.svelte";
 </script>
 
-<div class="toaster" aria-live="polite" aria-atomic="true">
+<div class="toaster" aria-live="polite">
   {#each toast.queue as t (t.id)}
-    <div class="toast tone-{t.tone}">
+    <div class="toast tone-{t.tone}" role={t.tone === "error" ? "alert" : undefined}>
       <span class="msg">{t.message}</span>
     </div>
   {/each}
@@ -52,6 +52,9 @@
   .msg {
     text-transform: lowercase;
     letter-spacing: 0.02em;
+    /* Break long unbroken tokens (multiaddrs, error payloads) so they
+     * wrap inside the 240px toast instead of overflowing. */
+    overflow-wrap: anywhere;
   }
   @keyframes slide-in {
     from {

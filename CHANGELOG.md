@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.95] — 2026-05-29
+
+- fix(ui): a11y + toast overflow — safe modal keys, roving pills, wrapping
+
 ## [0.1.94] — 2026-05-28
 
 - feat(ui): copy-diagnostics bug button + compact Connectivity, verbose → export

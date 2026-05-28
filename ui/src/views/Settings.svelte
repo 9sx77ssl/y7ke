@@ -140,6 +140,34 @@
   }
 
   // ── handlers ──────────────────────────────────────────────────────────────
+  // Roving-focus radiogroup: arrow keys move + select between the mode pills.
+  let pillsEl: HTMLDivElement | undefined;
+  function onPillsKey(e: KeyboardEvent): void {
+    const idx = MODES.findIndex((m) => m.value === dialMode);
+    let next = idx;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = (idx + 1) % MODES.length;
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = (idx - 1 + MODES.length) % MODES.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = MODES.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    selectMode(MODES[next].value);
+    pillsEl?.querySelectorAll<HTMLButtonElement>(".pill")[next]?.focus();
+  }
+
   function selectMode(next: DialMode): void {
     userTouched = true;
     dialMode = next;
@@ -267,12 +295,19 @@
 
     <!-- ── connection mode ────────────────────────────────────────────── -->
     <Card title="connection mode">
-      <div class="pills" role="radiogroup" aria-label="connection mode">
+      <div
+        class="pills"
+        role="radiogroup"
+        aria-label="connection mode"
+        bind:this={pillsEl}
+        onkeydown={onPillsKey}
+      >
         {#each MODES as opt}
           <button
             type="button"
             class="pill"
             class:active={dialMode === opt.value}
+            tabindex={dialMode === opt.value ? 0 : -1}
             role="radio"
             aria-checked={dialMode === opt.value}
             onclick={() => selectMode(opt.value)}

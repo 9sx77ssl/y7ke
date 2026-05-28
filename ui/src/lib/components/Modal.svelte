@@ -30,25 +30,64 @@
     children,
   }: Props = $props();
 
+  // Element to return focus to when the modal closes (the trigger).
+  let returnFocus: HTMLElement | null = null;
+
+  function restoreFocus() {
+    returnFocus?.focus?.();
+    returnFocus = null;
+  }
+
   function close() {
     open = false;
+    restoreFocus();
     onCancel?.();
   }
 
   function confirm() {
     open = false;
+    restoreFocus();
     onConfirm?.();
   }
 
   function onKey(e: KeyboardEvent) {
-    if (!open) return;
-    if (e.key === "Escape") close();
-    if (e.key === "Enter") confirm();
+    // Only Escape is handled globally. Enter is intentionally NOT a global
+    // confirm — that let a stray Enter fire a destructive action; instead it
+    // activates whichever button is focused (cancel is focused first).
+    if (open && e.key === "Escape") close();
   }
 
+  const FOCUSABLE =
+    'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
   function focusOnMount(node: HTMLElement) {
-    // Defer until rise animation has positioned the modal.
-    requestAnimationFrame(() => node.focus());
+    returnFocus = (document.activeElement as HTMLElement | null) ?? null;
+    requestAnimationFrame(() => {
+      // Focus the first control (the cancel button) so Enter is safe.
+      const first = node.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? node).focus();
+    });
+  }
+
+  // Trap Tab within the dialog so focus can't escape behind the backdrop.
+  function onDialogKey(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key !== "Tab") return;
+    const dialog = e.currentTarget as HTMLElement;
+    const nodes = Array.from(
+      dialog.querySelectorAll<HTMLElement>(FOCUSABLE),
+    ).filter((el) => el.offsetParent !== null);
+    if (nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 </script>
 
@@ -62,7 +101,7 @@
       aria-modal="true"
       aria-labelledby="modal-title"
       onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+      onkeydown={onDialogKey}
       tabindex="-1"
       use:focusOnMount
     >
