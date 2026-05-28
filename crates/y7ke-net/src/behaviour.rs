@@ -70,13 +70,20 @@ impl Y7Behaviour {
     ) -> Result<Self, std::io::Error> {
         let local_peer_id = local_keypair.public().to_peer_id();
 
+        // V2-A5: push_listen_addr_updates so peers see our /p2p-circuit
+        // listen address the instant our relay reservation lands, instead of
+        // waiting up to 60s for the next periodic identify push. Without this
+        // DCUtR's CONNECT arrives with stale ObsAddrs and the hole punch
+        // dials the wrong endpoint — see libp2p/rust-libp2p#4007 and
+        // docs/V2_GLOBAL_NETWORKING_PLAN.md §8.
         let identify = identify::Behaviour::new(
             identify::Config::new(
                 IDENTIFY_PROTOCOL_VERSION.to_string(),
                 local_keypair.public(),
             )
             .with_agent_version(IDENTIFY_AGENT_VERSION.to_string())
-            .with_interval(Duration::from_secs(60)),
+            .with_interval(Duration::from_secs(60))
+            .with_push_listen_addr_updates(true),
         );
 
         let ping = ping::Behaviour::new(
