@@ -65,14 +65,16 @@
     min-width: 0;
   }
 
-  /* Resize handles — invisible, 6px wide, positioned at window edges.
-   * Must sit BELOW the modal overlay (500) and toasts (1000): at 9999 the
-   * edge strips intercepted mousedown near a dialog/scrollbar and started a
-   * window resize instead. 90 keeps them grabbable at the bare window border
-   * (titlebar/sidebar don't reach the outer 6px) without covering content. */
+  /* Resize handles — invisible, 6px edge/corner strips. z-index 110 sits
+   * ABOVE the titlebar (100) so the top edge + corners are grabbable (the
+   * .controls buttons are inset by the titlebar padding, so the thin strips
+   * don't cover them), and BELOW the modal overlay (500) + toasts (1000) so
+   * they never intercept clicks near a dialog/scrollbar. (Requires the
+   * core:window:allow-start-resize-dragging capability, else the drag is
+   * ACL-rejected and the frameless window can't resize at all.) */
   .rz {
     position: fixed;
-    z-index: 90;
+    z-index: 110;
   }
   .rz-n  { top: 0;    left: 6px;  right: 6px;  height: 6px; cursor: n-resize;  }
   .rz-s  { bottom: 0; left: 6px;  right: 6px;  height: 6px; cursor: s-resize;  }
