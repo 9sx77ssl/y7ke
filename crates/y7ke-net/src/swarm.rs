@@ -137,10 +137,11 @@ pub fn spawn_swarm_with_bootstraps(
             Some(peer) => {
                 swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
                 bootstrap_peers.insert(peer, addr.clone());
+                let class = addr_class(addr);
                 if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%addr, "bootstrap dial failed: {e}");
+                    warn!(%addr, class, "bootstrap dial failed: {e}");
                 } else {
-                    info!(%peer, %addr, "dialing bootstrap node");
+                    debug!(%peer, %addr, class, "dialing bootstrap node");
                 }
             }
             None => {
@@ -227,9 +228,10 @@ fn reconnect_lost_bootstraps(swarm: &mut Swarm<Y7Behaviour>, state: &TaskState) 
         if swarm.is_connected(peer) {
             continue;
         }
+        let class = addr_class(addr);
         match swarm.dial(addr.clone()) {
-            Ok(_) => debug!(%peer, %addr, "redialing lost bootstrap"),
-            Err(e) => debug!(%peer, %addr, error = %e, "bootstrap redial failed"),
+            Ok(_) => debug!(%peer, %addr, class, "redialing lost bootstrap"),
+            Err(e) => debug!(%peer, %addr, class, error = %e, "bootstrap redial failed"),
         }
     }
 }
@@ -312,14 +314,17 @@ fn handle_command(
             // addresses from the swarm's own peer-address store; we
             // mirror them here so direct dials work.
             for addr in addrs {
+                let class = addr_class(&addr);
                 if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%peer, %addr, "dial failed: {e}");
+                    warn!(%peer, %addr, class, "dial failed: {e}");
                     emit(
                         event_tx,
                         NetEvent::Error {
                             message: format!("dial to {peer} at {addr} failed: {e}"),
                         },
                     );
+                } else {
+                    debug!(%peer, %addr, class, "dial issued (by Y7Id)");
                 }
             }
             let _ = response_tx.send(Ok(true));
@@ -356,9 +361,10 @@ fn handle_command(
                 state.remember_address(peer, address.clone());
                 swarm.add_peer_address(peer, address.clone());
             }
-            debug!(%address, "dialing multiaddr");
+            let class = addr_class(&address);
+            debug!(%address, class, "dialing multiaddr");
             if let Err(e) = swarm.dial(address.clone()) {
-                warn!(%address, "dial failed: {e}");
+                warn!(%address, class, "dial failed: {e}");
                 emit(
                     event_tx,
                     NetEvent::Error {
@@ -441,10 +447,11 @@ fn handle_command(
                     continue;
                 }
                 swarm.behaviour_mut().kad.add_address(peer, addr.clone());
+                let class = addr_class(addr);
                 if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%addr, "update_bootstraps: dial failed: {e}");
+                    warn!(%addr, class, "update_bootstraps: dial failed: {e}");
                 } else {
-                    info!(%peer, %addr, "update_bootstraps: dialing new bootstrap");
+                    debug!(%peer, %addr, class, "update_bootstraps: dialing new bootstrap");
                 }
             }
             state.bootstrap_peers = next;
@@ -460,17 +467,6 @@ fn handle_command(
             response_tx,
         } => {
             let result = peer_id_from_y7(&y7_id).map(|peer| swarm.is_connected(&peer));
-            let _ = response_tx.send(result);
-        }
-
-        NetCommand::CheckLive {
-            y7_id,
-            response_tx,
-        } => {
-            let result = match peer_id_from_y7(&y7_id) {
-                Ok(peer) => Ok(swarm.is_connected(&peer)),
-                Err(e) => Err(e),
-            };
             let _ = response_tx.send(result);
         }
 
@@ -922,13 +918,30 @@ fn connection_kind_for(endpoint: &ConnectedPoint) -> ConnectionKind {
     // `/p2p/<src>` (no `p2p-circuit` component) — the circuit marker
     // lives in `local_addr` instead. `ConnectedPoint::is_relayed`
     // handles both endpoint roles correctly.
-    if endpoint.is_relayed() {
-        return ConnectionKind::Relayed;
-    }
-    if multiaddr_is_lan(endpoint.get_remote_address()) {
+    let remote = endpoint.get_remote_address();
+    let kind = if endpoint.is_relayed() {
+        ConnectionKind::Relayed
+    } else if multiaddr_is_lan(remote) {
         ConnectionKind::Lan
     } else {
         ConnectionKind::Internet
+    };
+    debug!(addr = %remote, ?kind, "connection_kind_for: classified");
+    kind
+}
+
+/// Classify a `Multiaddr` into a coarse transport bucket for debug
+/// logs at each `swarm.dial(...)` site.
+fn addr_class(addr: &Multiaddr) -> &'static str {
+    let is_circuit = addr
+        .iter()
+        .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+    if is_circuit {
+        "relay"
+    } else if multiaddr_is_lan(addr) {
+        "lan"
+    } else {
+        "internet"
     }
 }
 
