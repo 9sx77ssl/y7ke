@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.99] — 2026-05-29
+
+- chore: regenerate DialMode.ts (drop stale serde-alias doc comment)
+
 ## [0.1.98] — 2026-05-29
 
 - refactor: drop the duplicate P2p dial mode → two modes (lan only / Y7net)
