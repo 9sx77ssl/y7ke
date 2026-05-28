@@ -49,7 +49,7 @@
       case "relayed":
         return `relayed via ${host} — end-to-end encrypted, latency may be slightly higher`;
       case "direct":
-        return "direct connection (NAT-traversed)";
+        return "direct p2p connection (hole-punched through bootstrap)";
       case "offline":
       case "connecting":
         return "";

@@ -88,6 +88,21 @@ async fn dispatch(
             }
             Ok(())
         }
+        NetEvent::ConnectionUpgraded { peer, kind } => {
+            // V2-A5: DCUtR succeeded — bump presence to the upgraded
+            // tier. Same code path as ConnectionEstablished; no queue
+            // drain because the relay path already delivered any
+            // in-flight messages.
+            if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
+                inner.presence.write().await.insert(y7, kind);
+                tracing::info!(%y7, ?kind, "presence upgraded via DCUtR");
+                let _ = event_tx.send(AppEvent::PresenceChanged {
+                    y7_id: y7.to_uri(),
+                    connection: kind,
+                });
+            }
+            Ok(())
+        }
         NetEvent::ConnectionClosed { peer } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
                 inner
