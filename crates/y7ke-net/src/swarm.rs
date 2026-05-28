@@ -565,6 +565,19 @@ fn handle_command(
                         }
                     }
                     state.relay_reserved.clear();
+                    // Drop cached /p2p-circuit addrs from the address
+                    // book. NetCommand::Dial replays every known addr
+                    // unfiltered, so a leftover circuit entry would let a
+                    // soft-redial issue a relay dial under LanOnly,
+                    // breaking the LanOnly contract. Re-entering Internet
+                    // mode repopulates them via remember_address.
+                    for addrs in state.address_book.values_mut() {
+                        addrs.retain(|a| {
+                            !a.iter()
+                                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+                        });
+                    }
+                    state.address_book.retain(|_, addrs| !addrs.is_empty());
                     // Disconnect bootstrap peers.
                     let peers: Vec<PeerId> = state.bootstrap_peers.keys().copied().collect();
                     for peer in peers {
