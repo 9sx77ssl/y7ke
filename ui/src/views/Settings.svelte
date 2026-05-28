@@ -407,7 +407,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: var(--y7-sp-8) var(--y7-sp-6);
+    padding: var(--y7-sp-6) var(--y7-sp-6);
     background: var(--y7-bg-base);
   }
   .content {
@@ -518,6 +518,7 @@
     font-family: var(--y7-font-mono);
     font-size: var(--y7-fs-sm);
     line-height: 1;
+    text-overflow: ellipsis;
     transition: border-color var(--y7-dur-fast) var(--y7-ease);
   }
   .input::placeholder {
@@ -531,7 +532,10 @@
     color: var(--y7-text-secondary);
     background: var(--y7-bg-elevated);
     cursor: default;
-    padding-right: 76px;
+    /* Right gutter for the absolutely-positioned "default" badge,
+     * expressed on the 4px grid (sp-8 + sp-10 = 72px) instead of a magic
+     * 76. The ellipsis above keeps a long value tidy under the badge. */
+    padding-right: calc(var(--y7-sp-8) + var(--y7-sp-10));
   }
   .badge {
     position: absolute;

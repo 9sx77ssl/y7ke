@@ -126,7 +126,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: var(--y7-sp-8) var(--y7-sp-6);
+    padding: var(--y7-sp-6) var(--y7-sp-6);
     background: var(--y7-bg-base);
   }
   .content {

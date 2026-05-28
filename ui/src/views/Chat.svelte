@@ -212,9 +212,10 @@
     align-items: center;
     gap: var(--y7-sp-2);
     min-width: 0;
-    /* Never let the key block eat the whole header — leave the nickname
-     * at least half the width at small pane sizes. */
-    max-width: 45%;
+    /* Never let the key block eat the whole header — keep the nickname
+     * priority and let the key block shrink at narrow widths (it truncates). */
+    max-width: min(45%, 220px);
+    flex-shrink: 1;
   }
 
   .scroll {

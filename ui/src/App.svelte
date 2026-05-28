@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { identity, loadIdentity } from "./lib/stores/identity.svelte";
-  import { startEventDispatch } from "./lib/stores/events.svelte";
+  import { startEventDispatch, stopEventDispatch } from "./lib/stores/events.svelte";
   import IdentitySetup from "./views/IdentitySetup.svelte";
   import MainShell from "./views/MainShell.svelte";
   import Titlebar from "./lib/components/Titlebar.svelte";
@@ -23,6 +23,9 @@
   $effect(() => {
     void startEventDispatch();
     void loadIdentity();
+    // Tear down the singleton Tauri listener if App ever unmounts (it's the
+    // root today, so this is hygiene rather than a live leak).
+    return () => stopEventDispatch();
   });
 </script>
 
