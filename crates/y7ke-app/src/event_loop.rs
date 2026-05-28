@@ -434,6 +434,24 @@ async fn handle_msg(
     if inner.db.sessions().get(&sender_y7).await?.is_none() {
         return Err(AppError::network(format!("no session for {sender_y7}")));
     }
+
+    // Enforce blocks. reject_request marks a contact Blocked but keeps the
+    // session row, so without this gate a blocked peer could still deliver
+    // text — or, worse, ride a control frame (AcceptedRequest / ChatDeleted)
+    // inside /y7ke/msg to silently un-block itself or wipe the conversation.
+    // This single chokepoint covers both (control is dispatched only after
+    // this point). Ack=true so we don't leak the block state back to them.
+    if let Ok(Some(contact)) = inner.db.contacts().get(&sender_y7).await {
+        if contact.status == ContactStatus::Blocked {
+            tracing::info!(%sender_y7, "dropping inbound msg/control from blocked peer");
+            inner
+                .net
+                .respond_msg_take(channel, MsgResp { ack: true })
+                .await?;
+            return Ok(());
+        }
+    }
+
     let conversation_id = ConversationId::between(&sender_y7, &inner.my_y7_id);
     let conv_key =
         messaging::derive_conv_key(&inner.me, &envelope.sender_pub, conversation_id.as_bytes())?;

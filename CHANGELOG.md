@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.82] — 2026-05-28
+
+- fix(app): enforce ContactStatus::Blocked on inbound (security)
+
 ## [0.1.81] — 2026-05-28
 
 - docs: live cross-network smoke runbook (Phase 3.5)
