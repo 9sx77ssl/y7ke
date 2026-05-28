@@ -14,7 +14,7 @@ pub const DEFAULT_RELAY_BOOTSTRAP: &str =
     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo";
 
 /// Mutually-exclusive dial strategy. UI picks one via radio buttons.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../ui/src/lib/gen/")]
 pub enum DialMode {
     /// LAN-only. mDNS + cached LAN-only addrs. No Kad provider record,
@@ -22,16 +22,11 @@ pub enum DialMode {
     LanOnly,
     /// Bootstrap-assisted: Kad lookup + direct dial first, circuit-relay-v2
     /// fallback when direct fails.
+    #[default]
     Internet,
     /// P2P (UI-visible stub for V2-A5 DCUtR). Currently identical to
     /// Internet plus a one-shot info log per dial.
     P2p,
-}
-
-impl Default for DialMode {
-    fn default() -> Self {
-        Self::Internet
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, ts_rs::TS)]

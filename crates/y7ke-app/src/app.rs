@@ -243,11 +243,7 @@ async fn run_presence_ticker(
                                 prev = ?current_presence,
                                 "presence ticker: socket gone → Offline"
                             );
-                            inner
-                                .connection_kinds
-                                .write()
-                                .await
-                                .remove(&c.y7_id);
+                            inner.connection_kinds.write().await.remove(&c.y7_id);
                             inner
                                 .presence
                                 .write()

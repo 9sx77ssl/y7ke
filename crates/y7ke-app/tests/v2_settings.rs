@@ -36,7 +36,6 @@ async fn boot_then_add_extra_bootstrap() {
     app.shutdown().await.ok();
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dial_mode_round_trips_through_settings() {
     let dir = TempDir::new().unwrap();

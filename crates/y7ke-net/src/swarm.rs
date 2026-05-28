@@ -184,10 +184,7 @@ pub fn spawn_swarm_with_bootstraps(
     }
     if lan_only {
         // Don't advertise providing while LAN-only.
-        swarm
-            .behaviour_mut()
-            .kad
-            .set_mode(Some(kad::Mode::Client));
+        swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Client));
     }
 
     tokio::spawn(run_swarm(
@@ -540,19 +537,13 @@ fn handle_command(
                         debug!(%peer, "lan-only: disconnecting bootstrap");
                     }
                     // Move Kad to Client mode so we don't advertise.
-                    swarm
-                        .behaviour_mut()
-                        .kad
-                        .set_mode(Some(kad::Mode::Client));
+                    swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Client));
                     state.provided_self = false;
                 }
                 DialMode::Internet | DialMode::P2p => {
                     // Re-enable Kad advertising; routing-updated will
                     // start_providing again next time it fires.
-                    swarm
-                        .behaviour_mut()
-                        .kad
-                        .set_mode(Some(kad::Mode::Server));
+                    swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Server));
                     // Re-seed Kad + immediately probe bootstraps so the
                     // user doesn't wait BOOTSTRAP_RECONNECT_INTERVAL for
                     // the first dial.
@@ -569,10 +560,7 @@ fn handle_command(
             }
         }
 
-        NetCommand::CheckLive {
-            y7_id,
-            response_tx,
-        } => {
+        NetCommand::CheckLive { y7_id, response_tx } => {
             let result = peer_id_from_y7(&y7_id).map(|peer| swarm.is_connected(&peer));
             let _ = response_tx.send(result);
         }

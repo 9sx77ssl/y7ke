@@ -116,7 +116,11 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
     let alice_texts_set: HashSet<&str> = alice_msgs.iter().map(|m| m.text.as_str()).collect();
     let bob_texts_set: HashSet<&str> = bob_msgs.iter().map(|m| m.text.as_str()).collect();
 
-    let want: HashSet<&str> = alice_texts.iter().copied().chain(bob_texts.iter().copied()).collect();
+    let want: HashSet<&str> = alice_texts
+        .iter()
+        .copied()
+        .chain(bob_texts.iter().copied())
+        .collect();
     assert_eq!(
         alice_texts_set, want,
         "alice should hold exactly the 4 distinct messages, got {alice_texts_set:?}"

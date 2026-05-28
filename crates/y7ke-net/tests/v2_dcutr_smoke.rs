@@ -65,8 +65,16 @@ async fn run_dcutr_upgrade() {
 
     let alice_swarm = build_swarm(alice_kp).expect("build alice");
     let bob_swarm = build_swarm(bob_kp).expect("build bob");
-    let mut alice = spawn_swarm_with_bootstraps(alice_swarm, vec![bootstrap_multiaddr.clone()], y7ke_core::settings::DialMode::Internet);
-    let mut bob = spawn_swarm_with_bootstraps(bob_swarm, vec![bootstrap_multiaddr.clone()], y7ke_core::settings::DialMode::Internet);
+    let mut alice = spawn_swarm_with_bootstraps(
+        alice_swarm,
+        vec![bootstrap_multiaddr.clone()],
+        y7ke_core::settings::DialMode::Internet,
+    );
+    let mut bob = spawn_swarm_with_bootstraps(
+        bob_swarm,
+        vec![bootstrap_multiaddr.clone()],
+        y7ke_core::settings::DialMode::Internet,
+    );
 
     let _alice_listen = wait_for_listening(alice.event_rx()).await;
     let _bob_listen = wait_for_listening(bob.event_rx()).await;

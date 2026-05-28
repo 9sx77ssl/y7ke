@@ -967,7 +967,11 @@ mod tests {
         // Same expression event_loop::handle_sync uses inside SyncReq::Pull.
         let kept: Vec<&Message> = rows.iter().filter(|m| m.sender_pub == me).collect();
 
-        assert_eq!(kept.len(), 2, "should keep both rows where sender_pub == me");
+        assert_eq!(
+            kept.len(),
+            2,
+            "should keep both rows where sender_pub == me"
+        );
         assert!(
             kept.iter().all(|m| m.sender_pub == me),
             "no row from `them` or `stranger` should survive"
