@@ -78,6 +78,22 @@ impl<'db> MessagesDao<'db> {
         Ok(())
     }
 
+    /// Fetch a single message by id. Used by the outbound-queue drain so
+    /// it doesn't have to page the whole conversation (which strands a
+    /// queued message older than the page when a conversation is large).
+    pub async fn get(&self, message_id: &MessageId) -> Result<Option<Message>> {
+        let row: Option<RawMessage> = sqlx::query_as::<_, RawMessage>(
+            "SELECT message_id, conversation_id, sender_pub, recipient_pub, timestamp_ms, \
+                    status, payload_enc, payload_nonce, sig, inserted_at \
+             FROM messages WHERE message_id = ?",
+        )
+        .bind(&message_id.as_bytes()[..])
+        .fetch_optional(self.pool)
+        .await
+        .map_err(|e| AppError::storage(format!("messages.get: {e}")))?;
+        row.map(RawMessage::decode).transpose()
+    }
+
     pub async fn list_for_conversation(
         &self,
         conv: &ConversationId,
@@ -134,22 +150,32 @@ impl<'db> MessagesDao<'db> {
     }
 
     /// Pull messages with `message_id > since` ordered ascending, up to `limit`.
-    pub async fn pull_after(
+    /// Outbound-sync page: messages in `conv` that WE (`sender_pub`) sent,
+    /// after `since`, ascending, capped at `limit`. The `sender_pub` filter
+    /// lives in the query (not the caller) so a full page reliably means
+    /// "more of OUR rows exist" — the sync responder derives `has_more`
+    /// from this length, and the puller never gets a spuriously-empty page
+    /// (which would truncate the reconcile when a conversation interleaves
+    /// both directions).
+    pub async fn pull_outbound_after(
         &self,
         conv: &ConversationId,
+        sender_pub: &[u8; 32],
         since: Option<MessageId>,
         limit: i64,
     ) -> Result<Vec<Message>> {
         let conv_bytes = conv.as_bytes().to_vec();
+        let sender = sender_pub.to_vec();
         let rows: Vec<RawMessage> =
             match since {
                 Some(s) => sqlx::query_as::<_, RawMessage>(
                     "SELECT message_id, conversation_id, sender_pub, recipient_pub, timestamp_ms, \
                         status, payload_enc, payload_nonce, sig, inserted_at \
-                 FROM messages WHERE conversation_id = ? AND message_id > ? \
+                 FROM messages WHERE conversation_id = ? AND sender_pub = ? AND message_id > ? \
                  ORDER BY message_id ASC LIMIT ?",
                 )
                 .bind(conv_bytes)
+                .bind(sender)
                 .bind(s.as_bytes().to_vec())
                 .bind(limit)
                 .fetch_all(self.pool)
@@ -157,15 +183,16 @@ impl<'db> MessagesDao<'db> {
                 None => sqlx::query_as::<_, RawMessage>(
                     "SELECT message_id, conversation_id, sender_pub, recipient_pub, timestamp_ms, \
                         status, payload_enc, payload_nonce, sig, inserted_at \
-                 FROM messages WHERE conversation_id = ? \
+                 FROM messages WHERE conversation_id = ? AND sender_pub = ? \
                  ORDER BY message_id ASC LIMIT ?",
                 )
                 .bind(conv_bytes)
+                .bind(sender)
                 .bind(limit)
                 .fetch_all(self.pool)
                 .await,
             }
-            .map_err(|e| AppError::storage(format!("messages.pull_after: {e}")))?;
+            .map_err(|e| AppError::storage(format!("messages.pull_outbound_after: {e}")))?;
 
         rows.into_iter().map(RawMessage::decode).collect()
     }

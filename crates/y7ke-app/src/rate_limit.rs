@@ -59,8 +59,12 @@ impl RateLimiter {
                 max_events: 600,
                 window: Duration::from_secs(60),
             },
+            // One reconcile is up to 1 Header + SYNC_MAX_PULL_PAGES (64)
+            // Pull + 1 Ack ≈ 66 inbound sync RPCs in quick succession, so
+            // 30 truncated large backlogs. 128 fits a full reconcile with
+            // headroom while still bounding abuse (cf. msg 600).
             sync_limit: BucketLimit {
-                max_events: 30,
+                max_events: 128,
                 window: Duration::from_secs(60),
             },
         }

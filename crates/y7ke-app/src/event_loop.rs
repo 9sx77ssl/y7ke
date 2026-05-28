@@ -616,19 +616,19 @@ async fn handle_sync(
                 }
             } else {
                 let since_id = since.map(y7ke_core::MessageId::from_bytes);
+                // Only OUR-signed rows are streamable (echoing the
+                // requester's own envelopes back trips their "signed by
+                // wrong key" check). Filtering in the query means a full
+                // page reliably signals more rows, so has_more is accurate
+                // even when the conversation interleaves both directions.
                 let rows = inner
                     .db
                     .messages()
-                    .pull_after(&expected, since_id, limit as i64)
+                    .pull_outbound_after(&expected, &inner.my_pubkey, since_id, limit as i64)
                     .await?;
-                // Only stream back rows WE signed (outbound from us to the
-                // requester). pull_after returns the whole conversation; if
-                // we echo the requester's own envelopes back, their
-                // `ingest_synced_envelope` rejects them with "signed by
-                // wrong key" and they pollute the receiver log.
+                let has_more = rows.len() as u16 == limit;
                 let envelopes: Vec<MessageEnvelope> = rows
                     .into_iter()
-                    .filter(|m| m.sender_pub == inner.my_pubkey)
                     .map(|m| MessageEnvelope {
                         message_id: *m.message_id.as_bytes(),
                         sender_pub: m.sender_pub,
@@ -638,7 +638,6 @@ async fn handle_sync(
                         sig: m.sig,
                     })
                     .collect();
-                let has_more = envelopes.len() as u16 == limit;
                 SyncResp::Pull {
                     envelopes,
                     has_more,
@@ -700,17 +699,11 @@ async fn drain_queue_for_peer(
         if &entry.target_peer_y7_id != peer_y7 {
             continue;
         }
-        let conv = ConversationId::between(&inner.my_y7_id, peer_y7);
-        let messages = inner
-            .db
-            .messages()
-            .list_for_conversation(&conv, 1000)
-            .await?;
-        let Some(message) = messages
-            .into_iter()
-            .find(|m| m.message_id == entry.message_id)
-        else {
-            // Row vanished — drop the queue entry.
+        // Fetch the queued message directly by id — paging the
+        // conversation would miss (and then wrongly drop) a queued row
+        // older than the page in a large conversation.
+        let Some(message) = inner.db.messages().get(&entry.message_id).await? else {
+            // Row genuinely vanished — drop the queue entry.
             let _ = inner
                 .db
                 .sync_queue()
@@ -774,7 +767,16 @@ fn spawn_kick_sync(
     peer_id: PeerId,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = kick_sync_for_peer(&inner, &event_tx, &peer_y7, peer_id).await {
+        // In-flight guard: at most one reconcile per peer at a time, so a
+        // reconnect burst doesn't race several reconciles through the
+        // peer's inbound sync bucket (which would rate-limit and truncate).
+        if !inner.syncing.lock().await.insert(peer_y7) {
+            tracing::debug!(%peer_y7, "kick_sync already in flight; skipping");
+            return;
+        }
+        let result = kick_sync_for_peer(&inner, &event_tx, &peer_y7, peer_id).await;
+        inner.syncing.lock().await.remove(&peer_y7);
+        if let Err(e) = result {
             tracing::debug!(%peer_y7, error = %e, "kick_sync_for_peer failed");
         }
     });

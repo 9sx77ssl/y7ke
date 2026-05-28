@@ -112,6 +112,11 @@ pub(crate) struct AppInner {
     /// so a reconnect storm (50 contacts returning after a suspend)
     /// can't flood the DHT with simultaneous provider queries.
     pub kad_lookups: tokio::sync::Semaphore,
+    /// Peers with a sync reconcile in flight. A reconnect burst (relay +
+    /// DCUtR ConnectionEstablished + PeerDiscovered) would otherwise spawn
+    /// several reconciles for the same peer, racing each other through its
+    /// inbound sync rate-limit bucket and truncating. One at a time.
+    pub syncing: tokio::sync::Mutex<std::collections::HashSet<Y7Id>>,
     /// Per-peer metadata about the *current* best-kind connection,
     /// derived from the libp2p multiaddr on `ConnectionEstablished`.
     /// Surfaces in the Connectivity debug pane via
@@ -238,6 +243,7 @@ impl AppHandle {
             upgrade_backoff: tokio::sync::RwLock::new(HashMap::new()),
             reconnect_backoff: tokio::sync::RwLock::new(HashMap::new()),
             kad_lookups: tokio::sync::Semaphore::new(KAD_LOOKUP_CONCURRENCY),
+            syncing: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             connection_meta: tokio::sync::RwLock::new(HashMap::new()),
         });
 
