@@ -1031,10 +1031,21 @@ async fn handle_control(
     Ok(())
 }
 
-/// Wipe local state for `peer` via the storage DAO.
+/// Wipe local state for `peer`: storage rows plus every in-memory
+/// per-peer cache. The single chokepoint both delete paths share (local
+/// `delete_contact` and the inbound `ChatDeleted` control), so a removed
+/// contact leaves no orphaned presence/connection/backoff entries —
+/// which would otherwise grow unbounded across add/delete churn and keep
+/// the peer visible in the Connectivity pane.
 pub(crate) async fn wipe_conversation(inner: &Arc<AppInner>, peer: &Y7Id) -> Result<()> {
     let conv = ConversationId::between(&inner.my_y7_id, peer);
-    inner.db.wipe_peer(peer, &conv).await
+    inner.db.wipe_peer(peer, &conv).await?;
+    inner.presence.write().await.remove(peer);
+    inner.connections.write().await.remove(peer);
+    inner.connection_meta.write().await.remove(peer);
+    inner.upgrade_backoff.write().await.remove(peer);
+    inner.reconnect_backoff.write().await.remove(peer);
+    Ok(())
 }
 
 #[cfg(test)]
