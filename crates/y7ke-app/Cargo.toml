@@ -26,6 +26,7 @@ tracing-subscriber = { workspace = true }
 async-trait        = { workspace = true }
 blake3             = { workspace = true }
 ts-rs              = { workspace = true }
+rand               = { workspace = true }
 
 # libp2p types appear in y7ke-net's public API (NetEvent carries
 # `request_response::ResponseChannel` via `TakeOnce<_>`). We pull the same

@@ -98,6 +98,15 @@ pub(crate) struct AppInner {
     /// available. Cleared per peer on a successful upgrade or on a
     /// signal change.
     pub upgrade_backoff: tokio::sync::RwLock<HashMap<Y7Id, u32>>,
+    /// Per-peer exponential backoff for the presence ticker's Offline
+    /// arm. Bounds the otherwise-unbounded "re-dial every offline
+    /// contact every tick" into a 30s→10min schedule; reset per peer on
+    /// `ConnectionEstablished`. See `crate::reconnect`.
+    pub reconnect_backoff: tokio::sync::RwLock<HashMap<Y7Id, crate::reconnect::Backoff>>,
+    /// Caps concurrent Kad `find_peer` lookups from `dial_with_discovery`
+    /// so a reconnect storm (50 contacts returning after a suspend)
+    /// can't flood the DHT with simultaneous provider queries.
+    pub kad_lookups: tokio::sync::Semaphore,
     /// Per-peer metadata about the *current* best-kind connection,
     /// derived from the libp2p multiaddr on `ConnectionEstablished`.
     /// Surfaces in the Connectivity debug pane via
@@ -212,6 +221,8 @@ impl AppHandle {
             dcutr_failures: std::sync::atomic::AtomicU64::new(0),
             wake_notify: tokio::sync::Notify::new(),
             upgrade_backoff: tokio::sync::RwLock::new(HashMap::new()),
+            reconnect_backoff: tokio::sync::RwLock::new(HashMap::new()),
+            kad_lookups: tokio::sync::Semaphore::new(KAD_LOOKUP_CONCURRENCY),
             connection_meta: tokio::sync::RwLock::new(HashMap::new()),
         });
 
@@ -282,6 +293,8 @@ pub(crate) fn best_kind(set: &HashSet<ConnectionKind>) -> ConnectionKind {
 }
 
 const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Max simultaneous Kad `find_peer` lookups (reconnect-storm bound).
+const KAD_LOOKUP_CONCURRENCY: usize = 4;
 
 /// Background task: every 30 s OR on a `wake_notify` signal, walk
 /// Accepted contacts. Three jobs per iteration:
@@ -354,9 +367,31 @@ async fn run_presence_ticker(
 
             match current_presence {
                 ConnectionKind::Offline => {
-                    // Soft redial — best-effort. Don't run Kad here.
-                    if let Ok(true) = inner.net.dial(c.y7_id).await {
-                        tracing::debug!(y7_id = %c.y7_id, "presence ticker: soft redial issued");
+                    // Soft redial — best-effort, no Kad here. Gated by a
+                    // per-peer exponential backoff so a permanently-gone
+                    // contact decays from once-per-tick to once-per-10min
+                    // instead of being dialed on every tick forever.
+                    let now = std::time::Instant::now();
+                    // 0–500ms jitter desyncs peers that all went offline
+                    // together (suspend/resume) so they don't re-dial on
+                    // the same tick.
+                    let jitter = std::time::Duration::from_millis(rand::random::<u64>() % 500);
+                    let should_dial = {
+                        let mut bo = inner.reconnect_backoff.write().await;
+                        let entry = bo
+                            .entry(c.y7_id)
+                            .or_insert_with(|| crate::reconnect::Backoff::ready(now));
+                        if entry.due(now) {
+                            entry.record(now, jitter);
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if should_dial {
+                        if let Ok(true) = inner.net.dial(c.y7_id).await {
+                            tracing::debug!(y7_id = %c.y7_id, "presence ticker: soft redial issued");
+                        }
                     }
                 }
                 ConnectionKind::Relayed => {

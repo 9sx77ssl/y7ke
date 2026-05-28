@@ -158,9 +158,18 @@ impl AppHandle {
             return;
         }
 
-        // 3. Kad lookup.
+        // 3. Kad lookup. Bounded concurrency (KAD_LOOKUP_CONCURRENCY) so a
+        //    reconnect storm can't fan out into dozens of simultaneous DHT
+        //    provider queries. The permit is held only across the lookup,
+        //    then dropped before the step-4 re-dial. An AcquireError means
+        //    the semaphore closed (shutdown) — fall through unthrottled,
+        //    the swarm is tearing down anyway.
         tracing::info!(%peer, "discovery: step 3 — Kad get_providers query");
-        match self.inner.net.find_peer(peer).await {
+        let lookup = {
+            let _permit = self.inner.kad_lookups.acquire().await.ok();
+            self.inner.net.find_peer(peer).await
+        };
+        match lookup {
             Ok(addrs) => {
                 // V2-A5/A6: order direct QUIC > direct TCP > relay so
                 // hole-punch-capable direct paths are tried before we

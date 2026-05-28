@@ -100,6 +100,10 @@ async fn dispatch(
                     transport: crate::app::extract_transport(&endpoint_addr),
                 };
                 inner.connection_meta.write().await.insert(y7, meta);
+                // Peer is reachable again — drop its reconnect backoff so
+                // a future disconnect retries immediately rather than
+                // inheriting a stale long cooldown.
+                inner.reconnect_backoff.write().await.remove(&y7);
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
