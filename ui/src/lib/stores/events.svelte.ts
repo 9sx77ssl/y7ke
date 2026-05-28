@@ -68,6 +68,13 @@ export const eventState = {
 
 let unlisten: UnlistenFn | null = null;
 
+// Dedup repeating background errors so a retrying peer (reconnect/sync
+// storm, stale session, undecryptable envelope) can't flood the toast
+// queue with the same message every tick and bury real toasts.
+let lastBgMsg: string | null = null;
+let lastBgAt = 0;
+const BG_ERR_DEDUP_MS = 5000;
+
 export async function startEventDispatch(): Promise<void> {
   if (state.started || state.starting) return;
   state.starting = true;
@@ -133,9 +140,14 @@ function dispatch(ev: AppEvent): void {
     case "nat_status_changed":
       state.natRev += 1;
       break;
-    case "background_error":
+    case "background_error": {
+      const now = Date.now();
+      if (ev.message === lastBgMsg && now - lastBgAt < BG_ERR_DEDUP_MS) break;
+      lastBgMsg = ev.message;
+      lastBgAt = now;
       state.lastBackgroundError = ev.message;
       break;
+    }
   }
 }
 

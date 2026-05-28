@@ -445,9 +445,17 @@ async fn handle_msg(
         return Ok(());
     }
 
-    // Need a session — established by an earlier handshake.
+    // Need a session — established by an earlier handshake. A peer messaging
+    // us without one (we wiped them, or they're re-sending against a dropped
+    // session) is routine and peer-driven: warn + drop, don't propagate as a
+    // BackgroundError that would toast the user on every retry.
     if inner.db.sessions().get(&sender_y7).await?.is_none() {
-        return Err(AppError::network(format!("no session for {sender_y7}")));
+        tracing::warn!(%sender_y7, "inbound msg with no session; dropping");
+        inner
+            .net
+            .respond_msg_take(channel, MsgResp { ack: false })
+            .await?;
+        return Ok(());
     }
 
     // Enforce blocks. reject_request marks a contact Blocked but keeps the

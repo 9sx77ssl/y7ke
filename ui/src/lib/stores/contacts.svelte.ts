@@ -3,7 +3,10 @@
 
 import { deleteContact as rpcDelete, listContacts } from "../bridge";
 import type { ContactView } from "../types";
+import { log } from "../log";
 import { seedPresence } from "./presence.svelte";
+
+const logger = log("contacts");
 
 interface ContactsState {
   items: ContactView[];
@@ -71,12 +74,18 @@ export async function refreshContacts(): Promise<void> {
 export function applyContactAdded(_y7Id: string): void {
   // The backend's contact_added event doesn't carry the full row, so the
   // cheapest correct thing is to re-fetch. refreshContacts is idempotent.
-  void refreshContacts();
+  // A failed background refresh sets state.error but is only rendered when
+  // the list is empty, so log it too rather than swallowing silently.
+  refreshContacts().catch((e) =>
+    logger.warn("background refresh (contact_added) failed", e),
+  );
 }
 
 /** Event dispatch — contact_removed. Refresh + eject from chat if open. */
 export function applyContactRemoved(_y7Id: string): void {
-  void refreshContacts();
+  refreshContacts().catch((e) =>
+    logger.warn("background refresh (contact_removed) failed", e),
+  );
 }
 
 export function findContact(y7Id: string): ContactView | undefined {

@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.90] — 2026-05-28
+
+- fix(ui+app): error/status handling — no toast floods, banners persist
+
 ## [0.1.89] — 2026-05-28
 
 - fix(ui): reactive correctness — settings re-hydrate + connectivity refresh race

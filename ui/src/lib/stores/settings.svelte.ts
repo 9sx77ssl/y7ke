@@ -94,6 +94,9 @@ export async function saveSettings(
     await updateSettings(next);
     state.settings = next;
     logger.info("saved");
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : String(err);
+    throw err;
   } finally {
     state.saving = false;
   }
@@ -107,6 +110,9 @@ export async function pingAll(): Promise<BootstrapEntry[]> {
     state.bootstraps = updated;
     logger.info("ping complete", `entries=${updated.length}`);
     return updated;
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : String(err);
+    throw err;
   } finally {
     state.pinging = false;
   }
