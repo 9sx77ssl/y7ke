@@ -182,6 +182,11 @@ async fn dispatch(
                         }
                     }
                 }
+                // Reset the upgrade-from-relay backoff: if this was a
+                // direct path dropping back to relay we want to retry the
+                // upgrade aggressively again, and a flapping relay peer
+                // must not inherit a stale high attempt count on reconnect.
+                inner.upgrade_backoff.write().await.remove(&y7);
                 let best = crate::app::refresh_presence(inner, y7).await;
                 tracing::debug!(%y7, ?best, "connection closed → presence recomputed");
                 let _ = event_tx.send(AppEvent::PresenceChanged {

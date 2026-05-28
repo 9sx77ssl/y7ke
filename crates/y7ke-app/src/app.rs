@@ -336,6 +336,15 @@ const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_se
 /// Max simultaneous Kad `find_peer` lookups (reconnect-storm bound).
 const KAD_LOOKUP_CONCURRENCY: usize = 4;
 
+/// Relay→direct upgrade schedule in presence-tick units: an early burst
+/// at ticks 0/5/10 (observed addrs freshest just after the relay path
+/// forms), then one attempt every 20 ticks (~10 min) indefinitely.
+/// Periodic-not-permanent keeps "relay is temporary" alive without the
+/// every-tick storm. Pure so the cadence is unit-testable.
+fn should_attempt_upgrade(attempts: u32) -> bool {
+    matches!(attempts, 0 | 5 | 10) || (attempts > 10 && attempts % 20 == 0)
+}
+
 /// Background task: every 30 s OR on a `wake_notify` signal, walk
 /// Accepted contacts. Three jobs per iteration:
 ///
@@ -435,10 +444,15 @@ async fn run_presence_ticker(
                     }
                 }
                 ConnectionKind::Relayed => {
-                    // V2-A5 "relay is temporary": exp backoff in tick
-                    // units (1, 5, 10 then stay). On AutoNAT verdict
-                    // flip the wake_notify path also resets the
-                    // counter (handled in handle_nat_status).
+                    // V2-A5 "relay is temporary": attempt a relay→direct
+                    // upgrade in an early burst (ticks 0, 5, 10 — when the
+                    // identify-pushed observed addrs are freshest), then
+                    // settle to one attempt every 20 ticks (~10 min)
+                    // indefinitely. Periodic-not-permanent honours "relay
+                    // is temporary" (NAT conditions may change) without
+                    // the every-tick storm the old `>= 20` clause caused.
+                    // The counter resets on AutoNAT verdict flip
+                    // (handle_nat_status) and on ConnectionClosed.
                     let attempts = {
                         let mut bo = inner.upgrade_backoff.write().await;
                         let n = bo.entry(c.y7_id).or_insert(0);
@@ -446,7 +460,7 @@ async fn run_presence_ticker(
                         *n = n.saturating_add(1);
                         old
                     };
-                    let should_try = matches!(attempts, 0 | 5 | 10) || attempts >= 20;
+                    let should_try = should_attempt_upgrade(attempts);
                     if should_try {
                         // Live check first — don't fire if the relay
                         // connection died between events.
@@ -544,6 +558,24 @@ mod tests {
             entry(ConnectionKind::Direct),
         );
         assert_eq!(best_conn(&conns).0, ConnectionKind::Direct);
+    }
+
+    #[test]
+    fn upgrade_schedule_is_burst_then_periodic_not_every_tick() {
+        // Early burst.
+        assert!(should_attempt_upgrade(0));
+        assert!(should_attempt_upgrade(5));
+        assert!(should_attempt_upgrade(10));
+        // Quiet between the burst points.
+        assert!(!should_attempt_upgrade(1));
+        assert!(!should_attempt_upgrade(11));
+        assert!(!should_attempt_upgrade(15));
+        // Periodic every-20 from the 10-min mark — NOT every tick (the
+        // old `>= 20` bug fired on 20,21,22,…).
+        assert!(should_attempt_upgrade(20));
+        assert!(!should_attempt_upgrade(21));
+        assert!(!should_attempt_upgrade(39));
+        assert!(should_attempt_upgrade(40));
     }
 
     #[test]
