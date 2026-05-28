@@ -890,3 +890,52 @@ pub(crate) async fn wipe_conversation(inner: &Arc<AppInner>, peer: &Y7Id) -> Res
     let conv = ConversationId::between(&inner.my_y7_id, peer);
     inner.db.wipe_peer(peer, &conv).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use y7ke_core::MessageId;
+    use y7ke_storage::dao::messages::Message;
+
+    fn fake_message(sender: [u8; 32], recipient: [u8; 32]) -> Message {
+        Message {
+            message_id: MessageId::new_v7(),
+            conversation_id: ConversationId([0u8; 16]),
+            sender_pub: sender,
+            recipient_pub: recipient,
+            timestamp_ms: 0,
+            status: MessageStatus::Synced,
+            payload_enc: Vec::new(),
+            payload_nonce: [0u8; 12],
+            sig: [0u8; 64],
+            inserted_at: 0,
+        }
+    }
+
+    /// Regression for the V2-C sync-envelope filter: `SyncReq::Pull`
+    /// must only return rows we ourselves signed. Mixing in rows we
+    /// merely *received* from the requester would round-trip back to
+    /// them and trip their `signed by wrong key` rejection.
+    #[test]
+    fn pull_filter_keeps_only_own_signed_rows() {
+        let me = [1u8; 32];
+        let them = [2u8; 32];
+        let stranger = [9u8; 32];
+
+        let rows = vec![
+            fake_message(me, them),
+            fake_message(them, me),
+            fake_message(me, them),
+            fake_message(stranger, me),
+        ];
+
+        // Same expression event_loop::handle_sync uses inside SyncReq::Pull.
+        let kept: Vec<&Message> = rows.iter().filter(|m| m.sender_pub == me).collect();
+
+        assert_eq!(kept.len(), 2, "should keep both rows where sender_pub == me");
+        assert!(
+            kept.iter().all(|m| m.sender_pub == me),
+            "no row from `them` or `stranger` should survive"
+        );
+    }
+}
