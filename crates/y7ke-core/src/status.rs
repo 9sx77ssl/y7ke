@@ -76,6 +76,18 @@ pub enum NatReachability {
     Unknown,
 }
 
+/// Transport an active connection rides on. Extracted from the libp2p
+/// multiaddr on `ConnectionEstablished` and stored alongside the
+/// `ConnectionKind` so the Connectivity debug pane can show "QUIC" vs
+/// "TCP" per peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
+pub enum Transport {
+    Tcp,
+    Quic,
+}
+
 /// State of a pending contact request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

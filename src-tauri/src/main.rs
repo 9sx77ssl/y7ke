@@ -127,6 +127,7 @@ fn main() {
             commands::select_best_bootstrap,
             commands::get_dcutr_stats,
             commands::get_nat_status,
+            commands::list_active_connections,
         ])
         .run(tauri::generate_context!());
 

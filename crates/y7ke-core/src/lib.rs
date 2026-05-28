@@ -10,11 +10,11 @@ pub mod id;
 pub mod settings;
 pub mod status;
 
-pub use diagnostics::DcutrStats;
+pub use diagnostics::{ConnectionView, DcutrStats};
 pub use error::{AppError, Result};
 pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};
 pub use settings::{BootstrapEntry, DialMode, Settings, DEFAULT_RELAY_BOOTSTRAP};
 pub use status::{
-    ConnectionKind, ContactStatus, MessageStatus, NatReachability, RequestResolution,
+    ConnectionKind, ContactStatus, MessageStatus, NatReachability, RequestResolution, Transport,
 };

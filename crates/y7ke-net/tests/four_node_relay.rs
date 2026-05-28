@@ -268,7 +268,7 @@ async fn wait_for_connection_to(
 ) -> ConnectionKind {
     loop {
         match rx.recv().await {
-            Ok(NetEvent::ConnectionEstablished { peer, kind }) if peer == expected => {
+            Ok(NetEvent::ConnectionEstablished { peer, kind, .. }) if peer == expected => {
                 return kind;
             }
             Ok(_) => continue,

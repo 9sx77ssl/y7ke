@@ -35,6 +35,29 @@ impl AppHandle {
         self.inner.nat_status.read().await.verdict
     }
 
+    /// Snapshot every active connection's metadata for the Connectivity
+    /// debug pane. Builds a ConnectionView per peer that has a
+    /// non-Offline entry in the presence map, joining the kind,
+    /// connection_meta (transport + via_host), and the peer's `y7:`
+    /// URI. Cheap RwLock read, no allocations beyond the result Vec.
+    pub async fn list_active_connections(&self) -> Vec<y7ke_core::ConnectionView> {
+        let presence = self.inner.presence.read().await;
+        let meta = self.inner.connection_meta.read().await;
+        presence
+            .iter()
+            .filter(|(_, kind)| !matches!(**kind, y7ke_core::ConnectionKind::Offline))
+            .map(|(y7, kind)| {
+                let m = meta.get(y7).cloned().unwrap_or_default();
+                y7ke_core::ConnectionView {
+                    y7_id: y7.to_uri(),
+                    kind: *kind,
+                    via_host: m.via_host,
+                    transport: m.transport,
+                }
+            })
+            .collect()
+    }
+
     /// Persist `settings`, push the new bootstrap list to the swarm, apply
     /// any `dial_mode` change live, and emit `AppEvent::SettingsChanged`.
     pub async fn update_settings(&self, settings: Settings) -> Result<()> {

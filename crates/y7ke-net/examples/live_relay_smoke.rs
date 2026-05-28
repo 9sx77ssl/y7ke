@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let outcome = timeout(RESERVATION_BUDGET, async {
         loop {
             match net.event_rx().recv().await {
-                Ok(NetEvent::ConnectionEstablished { peer, kind }) => {
+                Ok(NetEvent::ConnectionEstablished { peer, kind, .. }) => {
                     println!("connected peer={peer} kind={kind:?}");
                     saw_connection = true;
                 }

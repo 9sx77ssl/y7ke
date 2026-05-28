@@ -11,6 +11,7 @@
   import { toast } from "../lib/components/toast.svelte";
   import AddContact from "./AddContact.svelte";
   import Chat from "./Chat.svelte";
+  import Connectivity from "./Connectivity.svelte";
   import EmptyChat from "./EmptyChat.svelte";
   import Requests from "./Requests.svelte";
   import Settings from "./Settings.svelte";
@@ -43,6 +44,8 @@
       <Requests />
     {:else if router.pane.kind === "settings"}
       <Settings />
+    {:else if router.pane.kind === "connectivity"}
+      <Connectivity />
     {/if}
   </section>
 </div>

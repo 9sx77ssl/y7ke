@@ -74,7 +74,11 @@ async fn dispatch(
             }
             Ok(())
         }
-        NetEvent::ConnectionEstablished { peer, kind } => {
+        NetEvent::ConnectionEstablished {
+            peer,
+            kind,
+            endpoint_addr,
+        } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
                 // Track every active kind for this peer; pick the best
                 // for the user-visible presence. Without this a Relayed
@@ -88,6 +92,14 @@ async fn dispatch(
                     crate::app::best_kind(set)
                 };
                 inner.presence.write().await.insert(y7, best);
+                // Connectivity-pane data: record via_host + transport
+                // for the best-kind path. Best-effort multiaddr parsing
+                // — a malformed addr just leaves the meta empty.
+                let meta = crate::app::ConnectionMeta {
+                    via_host: crate::app::extract_relay_via_host(&endpoint_addr),
+                    transport: crate::app::extract_transport(&endpoint_addr),
+                };
+                inner.connection_meta.write().await.insert(y7, meta);
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
@@ -149,6 +161,7 @@ async fn dispatch(
                     kinds.remove(&y7);
                     ConnectionKind::Offline
                 };
+                inner.connection_meta.write().await.remove(&y7);
                 inner.presence.write().await.insert(y7, best);
                 tracing::debug!(%y7, "connection closed → presence offline");
                 let _ = event_tx.send(AppEvent::PresenceChanged {

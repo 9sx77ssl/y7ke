@@ -134,6 +134,24 @@ export function selectBestBootstrap(): Promise<string | null> {
   return call<string | null>("select_best_bootstrap");
 }
 
+// ── Diagnostics ─────────────────────────────────────────────────────────────
+
+import type { DcutrStats } from "./gen/DcutrStats";
+import type { NatReachability } from "./gen/NatReachability";
+import type { ConnectionView } from "./gen/ConnectionView";
+
+export function getDcutrStats(): Promise<DcutrStats> {
+  return call<DcutrStats>("get_dcutr_stats");
+}
+
+export function getNatStatus(): Promise<NatReachability> {
+  return call<NatReachability>("get_nat_status");
+}
+
+export function listActiveConnections(): Promise<ConnectionView[]> {
+  return call<ConnectionView[]>("list_active_connections");
+}
+
 // ── Events ──────────────────────────────────────────────────────────────────
 
 export function onAppEvent(

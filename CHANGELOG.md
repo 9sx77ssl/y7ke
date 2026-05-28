@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.68] — 2026-05-28
+
+- feat: Connectivity debug pane — per-peer transport + relay path + NAT verdict
+
 ## [0.1.67] — 2026-05-28
 
 - feat(app): instant settings live-apply + stale-relay address-book sweep

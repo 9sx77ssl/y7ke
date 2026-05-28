@@ -447,8 +447,15 @@ pub enum NetEvent {
         addrs: Vec<Multiaddr>,
         y7_id: Option<Y7Id>,
     },
-    /// Connection opened. `kind` reflects how we reached the peer.
-    ConnectionEstablished { peer: PeerId, kind: ConnectionKind },
+    /// Connection opened. `kind` reflects how we reached the peer;
+    /// `endpoint_addr` is the full remote multiaddr so the app layer
+    /// can derive transport (TCP vs QUIC) + relay host for the
+    /// Connectivity debug pane without re-querying the swarm.
+    ConnectionEstablished {
+        peer: PeerId,
+        kind: ConnectionKind,
+        endpoint_addr: Multiaddr,
+    },
     /// Connection torn down. The application layer should mark the peer
     /// offline / move pending sends back to the retry queue.
     ConnectionClosed { peer: PeerId },

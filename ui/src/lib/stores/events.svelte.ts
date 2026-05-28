@@ -31,6 +31,12 @@ interface EventState {
   starting: boolean;
   error: string | null;
   lastBackgroundError: string | null;
+  /// Bumped on every presence_changed event. Views that want to
+  /// re-poll a derived backend snapshot on connection churn can
+  /// $effect on `eventState.presenceRev`.
+  presenceRev: number;
+  /// Bumped on nat_status_changed.
+  natRev: number;
 }
 
 const state = $state<EventState>({
@@ -38,6 +44,8 @@ const state = $state<EventState>({
   starting: false,
   error: null,
   lastBackgroundError: null,
+  presenceRev: 0,
+  natRev: 0,
 });
 
 export const eventState = {
@@ -49,6 +57,12 @@ export const eventState = {
   },
   get lastBackgroundError(): string | null {
     return state.lastBackgroundError;
+  },
+  get presenceRev(): number {
+    return state.presenceRev;
+  },
+  get natRev(): number {
+    return state.natRev;
   },
 };
 
@@ -111,9 +125,13 @@ function dispatch(ev: AppEvent): void {
       break;
     case "presence_changed":
       applyPresence(ev.y7_id, ev.connection);
+      state.presenceRev += 1;
       break;
     case "settings_changed":
       void refreshSettings();
+      break;
+    case "nat_status_changed":
+      state.natRev += 1;
       break;
     case "background_error":
       state.lastBackgroundError = ev.message;

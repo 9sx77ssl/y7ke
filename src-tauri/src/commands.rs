@@ -197,3 +197,8 @@ pub async fn get_dcutr_stats(app: S<'_>) -> Result<y7ke_core::DcutrStats, String
 pub async fn get_nat_status(app: S<'_>) -> Result<y7ke_core::NatReachability, String> {
     Ok(app.get().await.get_nat_status().await)
 }
+
+#[tauri::command]
+pub async fn list_active_connections(app: S<'_>) -> Result<Vec<y7ke_core::ConnectionView>, String> {
+    Ok(app.get().await.list_active_connections().await)
+}

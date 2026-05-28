@@ -15,6 +15,7 @@
     openEmpty,
     openRequests,
     openSettings,
+    openConnectivity,
     router,
   } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
@@ -133,6 +134,12 @@
       title="connection modes and bootstrap nodes"
       active={router.pane.kind === "settings"}
       onclick={openSettings}
+    />
+    <NavItem
+      label="connectivity O.O"
+      title="live nat / dcutr / transport diagnostics"
+      active={router.pane.kind === "connectivity"}
+      onclick={openConnectivity}
     />
   </nav>
 

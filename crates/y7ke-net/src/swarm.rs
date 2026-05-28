@@ -600,6 +600,7 @@ async fn handle_swarm_event(
                 NetEvent::ConnectionEstablished {
                     peer: peer_id,
                     kind,
+                    endpoint_addr: addr.clone(),
                 },
             );
 

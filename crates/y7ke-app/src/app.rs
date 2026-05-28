@@ -98,6 +98,59 @@ pub(crate) struct AppInner {
     /// available. Cleared per peer on a successful upgrade or on a
     /// signal change.
     pub upgrade_backoff: tokio::sync::RwLock<HashMap<Y7Id, u32>>,
+    /// Per-peer metadata about the *current* best-kind connection,
+    /// derived from the libp2p multiaddr on `ConnectionEstablished`.
+    /// Surfaces in the Connectivity debug pane via
+    /// `list_active_connections`. Cleared by `ConnectionClosed`.
+    pub connection_meta: tokio::sync::RwLock<HashMap<Y7Id, ConnectionMeta>>,
+}
+
+/// Per-active-connection metadata exposed via the Connectivity pane.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectionMeta {
+    /// For Relayed connections: the relay's host portion (DNS name or
+    /// IP) extracted from the multiaddr before `/p2p-circuit`.
+    pub via_host: Option<String>,
+    /// Underlying transport (TCP or QUIC) extracted from the multiaddr.
+    pub transport: Option<y7ke_core::Transport>,
+}
+
+/// Extract the host segment (e.g. `bootstrap1.y7v.lol`) from a relayed
+/// multiaddr, looking at the `/dns4|6` / `/ip4|6` immediately before
+/// `/p2p-circuit`. Returns `None` if the multiaddr isn't a circuit or
+/// the leading transport component can't be parsed.
+pub fn extract_relay_via_host(addr: &libp2p::Multiaddr) -> Option<String> {
+    use libp2p::multiaddr::Protocol;
+    let mut host: Option<String> = None;
+    for p in addr.iter() {
+        match p {
+            Protocol::Dns4(n) | Protocol::Dns6(n) | Protocol::Dns(n) => {
+                host = Some(n.to_string());
+            }
+            Protocol::Ip4(ip) => {
+                host = Some(ip.to_string());
+            }
+            Protocol::Ip6(ip) => {
+                host = Some(ip.to_string());
+            }
+            Protocol::P2pCircuit => return host,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Classify the underlying transport (TCP vs QUIC) from a multiaddr.
+pub fn extract_transport(addr: &libp2p::Multiaddr) -> Option<y7ke_core::Transport> {
+    use libp2p::multiaddr::Protocol;
+    for p in addr.iter() {
+        match p {
+            Protocol::QuicV1 | Protocol::Quic => return Some(y7ke_core::Transport::Quic),
+            Protocol::Tcp(_) => return Some(y7ke_core::Transport::Tcp),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Aggregate state derived from AutoNAT v2 probe results.
@@ -159,6 +212,7 @@ impl AppHandle {
             dcutr_failures: std::sync::atomic::AtomicU64::new(0),
             wake_notify: tokio::sync::Notify::new(),
             upgrade_backoff: tokio::sync::RwLock::new(HashMap::new()),
+            connection_meta: tokio::sync::RwLock::new(HashMap::new()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
