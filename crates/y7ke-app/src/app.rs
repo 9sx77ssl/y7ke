@@ -481,22 +481,43 @@ async fn run_presence_ticker(
                     }
                 }
                 _ => {
-                    // Live check — `swarm.is_connected` is the
-                    // authoritative source of truth. If false, the
-                    // socket died and ConnectionClosed never fired.
+                    // Snapshot the connection ids we know for this peer
+                    // BEFORE the awaiting liveness check. If check_live
+                    // says dead we remove only these — a fresh connection
+                    // the event loop inserts concurrently (a reconnect
+                    // landing mid-tick) is newer than our snapshot and must
+                    // survive, else a live peer is stranded Offline forever
+                    // (the Offline arm only soft-redials, which no-ops when
+                    // already connected, so it never self-heals).
+                    let snapshot: Vec<ConnectionId> = inner
+                        .connections
+                        .read()
+                        .await
+                        .get(&c.y7_id)
+                        .map(|m| m.keys().copied().collect())
+                        .unwrap_or_default();
                     match inner.net.check_live(c.y7_id).await {
                         Ok(true) => {} // still connected, nothing to do
                         Ok(false) => {
-                            tracing::info!(
-                                y7_id = %c.y7_id,
-                                prev = ?current_presence,
-                                "presence ticker: socket gone → Offline"
-                            );
-                            // is_connected == false ⇒ no surviving
-                            // connections, so drop the whole peer entry
-                            // and let refresh_presence settle to Offline.
-                            inner.connections.write().await.remove(&c.y7_id);
+                            {
+                                let mut conns = inner.connections.write().await;
+                                if let Some(by_id) = conns.get_mut(&c.y7_id) {
+                                    for id in &snapshot {
+                                        by_id.remove(id);
+                                    }
+                                    if by_id.is_empty() {
+                                        conns.remove(&c.y7_id);
+                                    }
+                                }
+                            }
                             let best = crate::app::refresh_presence(&inner, c.y7_id).await;
+                            if matches!(best, ConnectionKind::Offline) {
+                                tracing::info!(
+                                    y7_id = %c.y7_id,
+                                    prev = ?current_presence,
+                                    "presence ticker: socket gone → Offline"
+                                );
+                            }
                             let _ = event_tx.send(AppEvent::PresenceChanged {
                                 y7_id: c.y7_id.to_uri(),
                                 connection: best,

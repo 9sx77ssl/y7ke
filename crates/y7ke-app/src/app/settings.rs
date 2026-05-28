@@ -79,13 +79,16 @@ impl AppHandle {
             if let Err(e) = self.inner.net.apply_dial_mode(settings.dial_mode).await {
                 tracing::warn!(error = %e, "swarm rejected apply_dial_mode");
             }
-            // Best-effort: bump presence to Offline for every contact so
-            // the UI re-resolves now that connectivity rules have flipped.
+            // Re-emit each contact's ACTUAL current presence (recomputed
+            // from the authoritative connections map) so the UI re-syncs
+            // under the new mode. Blasting Offline here would strand any
+            // live LAN/Direct peer Offline in the UI until its next event.
             if let Ok(contacts) = self.inner.db.contacts().list().await {
                 for c in contacts {
+                    let best = crate::app::refresh_presence(&self.inner, c.y7_id).await;
                     let _ = self.event_tx.send(AppEvent::PresenceChanged {
                         y7_id: c.y7_id.to_uri(),
-                        connection: y7ke_core::ConnectionKind::Offline,
+                        connection: best,
                     });
                 }
             }
