@@ -399,9 +399,16 @@
     color: var(--y7-text-primary);
   }
   .pill.active {
-    background: var(--y7-accent);
-    border-color: var(--y7-accent);
-    color: var(--y7-text-on-accent, #000);
+    background: var(--y7-text-primary);
+    border-color: var(--y7-text-primary);
+    color: var(--y7-text-on-accent);
+    font-weight: var(--y7-fw-semibold);
+  }
+  .pill.active:hover {
+    background: var(--y7-text-primary);
+    border-color: var(--y7-text-primary);
+    color: var(--y7-text-on-accent);
+    opacity: 0.92;
   }
   .pill:focus-visible {
     outline: none;
