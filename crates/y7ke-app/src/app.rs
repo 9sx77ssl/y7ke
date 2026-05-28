@@ -111,6 +111,14 @@ impl AppHandle {
             event_loop::run(loop_inner, loop_event_tx, event_rx_for_loop).await;
         });
 
+        // Periodic presence liveness check. Holds a Weak<AppInner> so
+        // the task exits cleanly when the last AppHandle drops.
+        let presence_inner = Arc::downgrade(&inner);
+        let presence_event_tx = event_tx.clone();
+        tokio::spawn(async move {
+            run_presence_ticker(presence_inner, presence_event_tx).await;
+        });
+
         // Best-effort; no subscribers yet at boot.
         let _ = event_tx.send(AppEvent::IdentityReady {
             y7_id: my_y7_id.to_uri(),
@@ -159,6 +167,99 @@ pub(crate) fn best_kind(set: &HashSet<ConnectionKind>) -> ConnectionKind {
         .copied()
         .max_by_key(|k| connection_kind_precedence(*k))
         .unwrap_or(ConnectionKind::Offline)
+}
+
+const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Background task: every 30 s, walk Accepted contacts and ask the
+/// swarm whether each is still connected. Bumps presence to Offline
+/// when the socket has died silently (libp2p's ping behaviour will
+/// have dropped it, but the `ConnectionClosed` event might have been
+/// missed). For Offline contacts, attempts a soft `net.dial` — does
+/// NOT run Kad discovery from the ticker (that's expensive and
+/// happens on demand via `send_contact_request`).
+async fn run_presence_ticker(
+    inner: std::sync::Weak<AppInner>,
+    event_tx: broadcast::Sender<AppEvent>,
+) {
+    let mut tick = tokio::time::interval(PRESENCE_TICK_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Skip the immediate first tick — boot already published presence
+    // via NetEvent::ConnectionEstablished.
+    tick.tick().await;
+
+    loop {
+        tick.tick().await;
+        let Some(inner) = inner.upgrade() else {
+            tracing::debug!("presence ticker: AppInner dropped; exiting");
+            return;
+        };
+
+        let contacts = match inner.db.contacts().list().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!(error = %e, "presence ticker: contacts.list failed");
+                continue;
+            }
+        };
+        for c in contacts {
+            if c.status != y7ke_core::ContactStatus::Accepted {
+                continue;
+            }
+            let current_presence = inner
+                .presence
+                .read()
+                .await
+                .get(&c.y7_id)
+                .copied()
+                .unwrap_or(ConnectionKind::Offline);
+
+            match current_presence {
+                ConnectionKind::Offline => {
+                    // Soft redial — best-effort. Don't run Kad here.
+                    if let Ok(true) = inner.net.dial(c.y7_id).await {
+                        tracing::debug!(y7_id = %c.y7_id, "presence ticker: soft redial issued");
+                    }
+                }
+                _ => {
+                    // Live check — `swarm.is_connected` is the
+                    // authoritative source of truth. If false, the
+                    // socket died and ConnectionClosed never fired.
+                    match inner.net.check_live(c.y7_id).await {
+                        Ok(true) => {} // still connected, nothing to do
+                        Ok(false) => {
+                            tracing::info!(
+                                y7_id = %c.y7_id,
+                                prev = ?current_presence,
+                                "presence ticker: socket gone → Offline"
+                            );
+                            inner
+                                .connection_kinds
+                                .write()
+                                .await
+                                .remove(&c.y7_id);
+                            inner
+                                .presence
+                                .write()
+                                .await
+                                .insert(c.y7_id, ConnectionKind::Offline);
+                            let _ = event_tx.send(AppEvent::PresenceChanged {
+                                y7_id: c.y7_id.to_uri(),
+                                connection: ConnectionKind::Offline,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                y7_id = %c.y7_id,
+                                error = %e,
+                                "presence ticker: check_live failed"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Linux-only best-effort RSS reading via /proc/self/status. Boot telemetry only.

@@ -308,6 +308,26 @@ impl NetHandle {
             .map_err(|e| AppError::network(format!("command channel closed: {e}")))
     }
 
+    /// Cheap, network-free check: does the swarm currently hold any
+    /// active connection to `y7_id`? Used by the periodic presence
+    /// ticker to spot peers whose socket has died without a
+    /// `ConnectionClosed` (e.g. mom's laptop hibernated). When this
+    /// returns `false` for a previously-online peer, the caller
+    /// downgrades presence to Offline; libp2p's own `ping::Behaviour`
+    /// drives the actual socket health check on a 20 s interval.
+    pub async fn check_live(&self, y7_id: Y7Id) -> Result<bool, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(NetCommand::CheckLive {
+                y7_id,
+                response_tx: tx,
+            })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))?;
+        rx.await
+            .map_err(|e| AppError::network(format!("check_live response dropped: {e}")))?
+    }
+
     /// Request graceful shutdown. The swarm task will drain in-flight
     /// requests and exit. Subsequent commands return
     /// `AppError::Network("command channel closed")`.
@@ -381,6 +401,14 @@ pub enum NetCommand {
     /// `addresses` are removed from the redial loop (existing
     /// connections persist).
     UpdateBootstraps { addresses: Vec<Multiaddr> },
+    /// Resolve `response_tx` synchronously with
+    /// `swarm.is_connected(&peer_id)` for the derived libp2p PeerId.
+    /// Used by the app-layer presence ticker to detect dead sockets
+    /// that haven't yet surfaced a `ConnectionClosed` event.
+    CheckLive {
+        y7_id: Y7Id,
+        response_tx: oneshot::Sender<Result<bool, AppError>>,
+    },
     /// Stop the swarm task.
     Shutdown,
 }

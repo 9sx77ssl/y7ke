@@ -455,6 +455,25 @@ fn handle_command(
             }
         }
 
+        NetCommand::CheckLive {
+            y7_id,
+            response_tx,
+        } => {
+            let result = peer_id_from_y7(&y7_id).map(|peer| swarm.is_connected(&peer));
+            let _ = response_tx.send(result);
+        }
+
+        NetCommand::CheckLive {
+            y7_id,
+            response_tx,
+        } => {
+            let result = match peer_id_from_y7(&y7_id) {
+                Ok(peer) => Ok(swarm.is_connected(&peer)),
+                Err(e) => Err(e),
+            };
+            let _ = response_tx.send(result);
+        }
+
         NetCommand::Shutdown => {
             // Handled by the caller of `handle_command`. Should never
             // arrive here in practice; if it does, we just no-op.
