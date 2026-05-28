@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.69] — 2026-05-28
+
+- feat(net): idempotent swarm dials — collapse reconnect-storm fan-out
+
 ## [0.1.68] — 2026-05-28
 
 - feat: Connectivity debug pane — per-peer transport + relay path + NAT verdict

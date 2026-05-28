@@ -20,7 +20,10 @@ use libp2p::{
     core::{transport::ListenerId, ConnectedPoint},
     dcutr, identify, identity, kad, mdns, noise, relay,
     request_response::{self, OutboundRequestId},
-    swarm::SwarmEvent,
+    swarm::{
+        dial_opts::{DialOpts, PeerCondition},
+        DialError, SwarmEvent,
+    },
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -268,8 +271,20 @@ fn reconnect_lost_bootstraps(swarm: &mut Swarm<Y7Behaviour>, state: &TaskState) 
             continue;
         }
         let class = addr_class(addr);
-        match swarm.dial(addr.clone()) {
-            Ok(_) => debug!(%peer, %addr, class, "redialing lost bootstrap"),
+        // `DisconnectedAndNotDialing` so a slow bootstrap dial that
+        // hasn't resolved yet isn't re-issued on the next 15-s tick —
+        // we wait for the in-flight attempt to finish (succeed or fail)
+        // before trying again. Prevents a redial pile-up during an
+        // outage where every dial is timing out.
+        let opts = DialOpts::peer_id(*peer)
+            .addresses(vec![addr.clone()])
+            .condition(PeerCondition::DisconnectedAndNotDialing)
+            .build();
+        match swarm.dial(opts) {
+            Ok(()) => debug!(%peer, %addr, class, "redialing lost bootstrap"),
+            Err(DialError::DialPeerConditionFalse(_)) => {
+                debug!(%peer, class, "bootstrap redial skipped — dial already in progress")
+            }
             Err(e) => debug!(%peer, %addr, class, error = %e, "bootstrap redial failed"),
         }
     }
@@ -357,25 +372,45 @@ fn handle_command(
                 let _ = response_tx.send(Ok(false));
                 return;
             }
-            debug!(%peer, addr_count = addrs.len(), "dialing");
-            // request_response::Behaviour::send_request will use peer
-            // addresses from the swarm's own peer-address store; we
-            // mirror them here so direct dials work.
-            for addr in addrs {
-                let class = addr_class(&addr);
-                if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%peer, %addr, class, "dial failed: {e}");
+            // Reconnect-storm guard: issue a SINGLE dial attempt for the
+            // peer carrying every known address, gated by
+            // `DisconnectedAndNotDialing`. libp2p dedups against an
+            // already-established connection or an in-flight dial, so N
+            // ticker/UI redials of the same peer collapse into at most one
+            // socket — no N×addrs fan-out. A condition-false result means
+            // we're already connected or mid-dial: treat it as success so
+            // the discovery chain doesn't fall through to a redundant Kad
+            // lookup.
+            let addr_count = addrs.len();
+            let opts = DialOpts::peer_id(peer)
+                .addresses(addrs)
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match swarm.dial(opts) {
+                Ok(()) => {
+                    debug!(%peer, addr_count, "dial issued (by Y7Id)");
+                    let _ = response_tx.send(Ok(true));
+                }
+                Err(DialError::DialPeerConditionFalse(_)) => {
+                    debug!(%peer, "dial skipped — already connected or dialing");
+                    let _ = response_tx.send(Ok(true));
+                }
+                Err(DialError::NoAddresses) => {
+                    let _ = response_tx.send(Ok(false));
+                }
+                Err(e) => {
+                    warn!(%peer, error = %e, "dial failed");
                     emit(
                         event_tx,
                         NetEvent::Error {
-                            message: format!("dial to {peer} at {addr} failed: {e}"),
+                            message: format!("dial to {peer} failed: {e}"),
                         },
                     );
-                } else {
-                    debug!(%peer, %addr, class, "dial issued (by Y7Id)");
+                    // Addresses existed and an attempt was made; don't
+                    // re-trigger discovery on a transport-level error.
+                    let _ = response_tx.send(Ok(true));
                 }
             }
-            let _ = response_tx.send(Ok(true));
         }
 
         NetCommand::FindPeer { y7_id, response_tx } => {
