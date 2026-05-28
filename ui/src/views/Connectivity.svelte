@@ -35,12 +35,17 @@
     successes: 0,
     failures: 0,
   });
-  let lastRefreshAt = $state<number>(0);
 
   // Monotonic generation: during a reconnect storm the poller + the event
   // reactor can launch overlapping refreshes; only the newest one is allowed
   // to commit, so a slow older call can't clobber fresh state with stale data.
   let gen = 0;
+
+  // Relay fallback is "active" when a peer is reachable only via relay.
+  const relayActive = $derived(
+    connections.some((c) => c.kind === "relayed") &&
+      !connections.some((c) => c.kind === "direct"),
+  );
 
   async function refresh(): Promise<void> {
     const my = ++gen;
@@ -56,7 +61,6 @@
       bootstraps = b;
       nat = n;
       dcutr = d;
-      lastRefreshAt = Date.now();
     } catch (err) {
       logger.warn("refresh failed", err instanceof Error ? err.message : err);
     }
@@ -73,11 +77,17 @@
 
   // React to AppEvents that demand a refresh, debounced so a presence/NAT
   // storm coalesces into a single fetch (~150ms quiet) instead of one
-  // 4-RPC burst per event.
+  // 4-RPC burst per event. Skip the first run — the poller above already
+  // does the mount fetch, so this shouldn't double-fire on open.
+  let reactorPrimed = false;
   $effect(() => {
     // Touching these dependencies forces re-run when the events fire.
     const _ = eventState.presenceRev + eventState.natRev;
     void _;
+    if (!reactorPrimed) {
+      reactorPrimed = true;
+      return;
+    }
     const id = setTimeout(() => {
       void refresh();
     }, 150);
@@ -144,12 +154,15 @@
     return parts[idx + 1] ?? b.multiaddr;
   }
 
-  function relativeAgeSec(ms: number): string {
-    if (ms === 0) return "—";
-    const d = Math.round((Date.now() - ms) / 1000);
-    if (d < 5) return "just now";
-    if (d < 60) return `${d}s ago`;
-    return `${Math.round(d / 60)}m ago`;
+  function reachLabel(b: BootstrapEntry): string {
+    if (b.last_ping_failed) return "unreachable";
+    if (b.last_ping_ms !== null) return "reachable";
+    return "—";
+  }
+  function reachTone(b: BootstrapEntry): "ok" | "fail" | "muted" {
+    if (b.last_ping_failed) return "fail";
+    if (b.last_ping_ms !== null) return "ok";
+    return "muted";
   }
 </script>
 
@@ -158,7 +171,6 @@
     <header class="head">
       <h1>connectivity</h1>
       <p class="sub">how this device is currently reaching everyone.</p>
-      <p class="meta">refreshed {relativeAgeSec(lastRefreshAt)}</p>
     </header>
 
     <!-- ── system panel ────────────────────────────────────────────────── -->
@@ -173,6 +185,12 @@
         <div class="metric">
           <span class="label">nat status</span>
           <span class="pill tone-{natTone(nat)}">{natLabel(nat)}</span>
+        </div>
+        <div class="metric">
+          <span class="label">relay fallback</span>
+          <span class="pill tone-{relayActive ? 'warn' : 'muted'}">
+            {relayActive ? "active" : "no"}
+          </span>
         </div>
         <div class="metric">
           <span class="label">dcutr</span>
@@ -198,13 +216,7 @@
               {#if b.is_default}
                 <span class="pill tone-muted">default</span>
               {/if}
-              <span class="ping {b.last_ping_failed ? 'tone-fail' : b.last_ping_ms !== null ? 'tone-ok' : 'tone-muted'}">
-                {b.last_ping_failed
-                  ? "failed"
-                  : b.last_ping_ms !== null
-                    ? `${Number(b.last_ping_ms)} ms`
-                    : "—"}
-              </span>
+              <span class="ping tone-{reachTone(b)}">{reachLabel(b)}</span>
             </li>
           {/each}
         </ul>
@@ -224,9 +236,6 @@
                 {kindLabel(c.kind)}
               </span>
               <span class="pill tone-muted">{transportLabel(c.transport)}</span>
-              {#if c.via_host}
-                <span class="via" title="relayed via">via {c.via_host}</span>
-              {/if}
             </li>
           {/each}
         </ul>
@@ -268,13 +277,6 @@
     font-size: var(--y7-fs-md);
     color: var(--y7-text-secondary);
     text-transform: lowercase;
-  }
-  .meta {
-    margin: 0;
-    font-size: var(--y7-fs-xs);
-    color: var(--y7-text-muted);
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
   }
 
   .metrics {
@@ -325,12 +327,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .via {
-    font-family: var(--y7-font-mono);
-    font-size: var(--y7-fs-xs);
-    color: var(--y7-text-muted);
-    text-transform: lowercase;
   }
 
   .pill,
