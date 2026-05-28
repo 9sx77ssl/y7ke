@@ -942,7 +942,7 @@ mod tests {
         let them = [2u8; 32];
         let stranger = [9u8; 32];
 
-        let rows = vec![
+        let rows = [
             fake_message(me, them),
             fake_message(them, me),
             fake_message(me, them),

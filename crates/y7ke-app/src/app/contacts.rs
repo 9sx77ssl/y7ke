@@ -157,7 +157,7 @@ impl AppHandle {
                 // last — Kad can return both the peer's public addr
                 // AND its 192.168.x.x interface, and the latter won't
                 // reach across NATs.
-                filtered.sort_by_key(|m| sort_addr_priority(m));
+                filtered.sort_by_key(sort_addr_priority);
                 tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter + sort)");
                 for addr in filtered {
                     if self.inner.net.dial_address(addr).await.is_ok() {
