@@ -102,7 +102,7 @@
       case "Internet":
         return "internet — finds peers through a bootstrap server, falls back to relay when direct dial fails";
       case "P2p":
-        return "p2p — direct peer-to-peer (hole-punching not yet implemented; behaves like internet for now)";
+        return "p2p — direct-first. relayed links automatically attempt a dcutr hole-punch upgrade to a direct path (same dial chain as internet today; real-nat punch success varies by nat type, relay stays as fallback)";
     }
   }
 

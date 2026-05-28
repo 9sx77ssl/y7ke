@@ -91,8 +91,9 @@ impl AppHandle {
     /// - `Internet`: all 4 steps. Step 3 (Kad) returns relay
     ///   multiaddrs naturally; direct dial preferred via
     ///   `sort_addrs_for_dial`.
-    /// - `P2p`: identical to `Internet` for now, plus a one-shot info
-    ///   log noting DCUtR is not yet implemented at the application layer.
+    /// - `P2p`: identical dial chain to `Internet` today. DCUtR runs
+    ///   automatically at the swarm level on any relayed connection
+    ///   regardless of mode, so there is no separate P2p dial path yet.
     async fn dial_with_discovery(&self, peer: Y7Id) {
         let mode = match self.inner.db.settings().get().await {
             Ok(s) => s.dial_mode,
@@ -104,9 +105,10 @@ impl AppHandle {
         tracing::info!(%peer, ?mode, "discovery: starting chain");
 
         if matches!(mode, y7ke_core::settings::DialMode::P2p) {
-            tracing::info!(
-                "p2p mode requested but DCUtR not yet implemented; falling back to relay-assisted internet"
-            );
+            // P2p shares the Internet dial chain today; DCUtR runs
+            // automatically (swarm-level) on any relayed connection
+            // regardless of mode, so there's no separate P2p dial path yet.
+            tracing::info!("p2p mode: using internet dial chain; dcutr upgrade is automatic on relayed links");
         }
 
         let lan_only = matches!(mode, y7ke_core::settings::DialMode::LanOnly);
