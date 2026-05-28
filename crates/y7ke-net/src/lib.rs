@@ -27,11 +27,13 @@
 //! ```
 
 pub mod behaviour;
+pub mod dial_priority;
 pub mod handle;
 pub mod protocol;
 pub mod swarm;
 
 pub use behaviour::{Y7Behaviour, Y7BehaviourEvent};
+pub use dial_priority::sort_addrs_for_dial;
 pub use handle::{NetCommand, NetEvent, NetHandle, TakeOnce};
 pub use protocol::{
     ConversationDigest, HandshakeReq, HandshakeResp, MessageEnvelope, MsgReq, MsgResp, SyncReq,
