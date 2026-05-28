@@ -518,12 +518,22 @@ Currently:
 [RFC 9000 §9](https://www.rfc-editor.org/rfc/rfc9000#name-connection-migration) — the laptop sleep/resume + Wi-Fi swap killer
 feature. libp2p-quic in 0.56 sits on top of `quinn` which supports
 the wire-level path validation but does not expose CID rotation as
-a configurable. **In-scope research for the Phase 3 step 12 test:**
-verify by experiment whether a libp2p-quic Y7KE connection actually
-migrates when a netns source IP changes, or whether it drops + the
-discovery chain re-runs. If migration works: great, document in
-this doc. If it doesn't: file a tracking issue, accept the drop +
-discovery-rerun behaviour for now.
+a configurable.
+
+**Experiment result (2026-05-28, `scripts/nat-sim/run-quic-migration.sh`).**
+A live direct-QUIC connection between two namespaces was kept open while
+the initiator's source IP was swapped (`10.0.0.2` → `10.0.0.22`).
+Outcome: **the connection does NOT transparently migrate** — quinn/
+libp2p-quic 0.13 drops it (probes fail with "connection lost",
+`ConnectionId(1)` closes), then the next outbound RPC **auto-re-dials**
+and a fresh `ConnectionId(3)` is established, with traffic resuming
+within ~2 s (the peer address is still reachable). So Y7KE inherits
+*drop + fast re-dial*, not wire-level migration. This is acceptable:
+the per-`ConnectionId` tracking surfaces the close + new-establish
+cleanly (no stuck-Offline), and in-flight messages during the gap are
+covered by the offline `sync_queue` + reconcile. A true zero-flap
+migration would require a libp2p-quic upgrade exposing CID rotation —
+tracked, not blocking.
 
 ### Address validation
 
@@ -764,7 +774,7 @@ beyond existing transitions.
 | `autonat_smoke.rs` (AutoNAT verdict) | — | **new — Phase 2 step 2** |
 | netns NAT sim — blocked path (relay required) | ✓ `scripts/nat-sim/run.sh` + `nat_sim_node` | — |
 | netns NAT sim — symmetric NAT (DCUtR fallback) | ✓ `scripts/nat-sim/run-symmetric.sh` | — |
-| `v2_transport_migration.rs` (IP change → QUIC migration) | — | **new — Phase 3 step 12** |
+| QUIC IP-change behaviour | ✓ `scripts/nat-sim/run-quic-migration.sh` (result: drop + re-dial, not migrate) | — |
 | `live_relay_smoke` (live VPS) | ✓ TCP | extend with QUIC variant — Phase 2 step 5 |
 | **manual cross-network smoke** | — | **new — Phase 3 step 13, captured in this doc as ground truth** |
 
