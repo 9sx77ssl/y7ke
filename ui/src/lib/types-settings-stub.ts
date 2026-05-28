@@ -3,6 +3,6 @@
 // stays so views can import from a single stable spot and so the place where
 // `bigint` (ts-rs maps Rust `u64`) crosses into UI code is obvious.
 
-export type { DialModes } from "./gen/DialModes";
+export type { DialMode } from "./gen/DialMode";
 export type { Settings } from "./gen/Settings";
 export type { BootstrapEntry } from "./gen/BootstrapEntry";

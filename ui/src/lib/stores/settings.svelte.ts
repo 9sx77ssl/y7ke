@@ -1,4 +1,4 @@
-// Settings store — dial modes + bootstrap nodes. Mirrors the same shape as
+// Settings store — dial mode + bootstrap nodes. Mirrors the same shape as
 // contacts.svelte / requests.svelte (state via $state, refresh* async,
 // loadedOnce flag, error string).
 
@@ -11,7 +11,7 @@ import {
 } from "../bridge";
 import type {
   BootstrapEntry,
-  DialModes,
+  DialMode,
   Settings,
 } from "../types-settings-stub";
 import { log } from "../log";
@@ -71,7 +71,7 @@ export async function refreshSettings(): Promise<void> {
     state.settings = s;
     state.bootstraps = b;
     state.loadedOnce = true;
-    logger.debug("refreshed", `dial_modes=${JSON.stringify(s.dial_modes)}`, `bootstraps=${b.length}`);
+    logger.debug("refreshed", `dial_mode=${s.dial_mode}`, `bootstraps=${b.length}`);
   } catch (err) {
     state.error = err instanceof Error ? err.message : String(err);
     logger.error("refresh failed", state.error);
@@ -81,14 +81,14 @@ export async function refreshSettings(): Promise<void> {
 }
 
 export async function saveSettings(
-  dialModes: DialModes,
+  dialMode: DialMode,
   extraBootstraps: string[],
 ): Promise<void> {
   state.saving = true;
   state.error = null;
   try {
     const next: Settings = {
-      dial_modes: dialModes,
+      dial_mode: dialMode,
       extra_bootstraps: extraBootstraps,
     };
     await updateSettings(next);

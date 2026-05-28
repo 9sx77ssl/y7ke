@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Settings view — dial-mode toggles + bootstrap-node editor.
+  // Settings view — dial-mode radio pills + bootstrap-node editor.
   //
   // The "extra" bootstraps list comes from `settings.extra_bootstraps` and
   // edits are committed only on Save. The hardcoded default bootstrap is
@@ -12,22 +12,16 @@
     saveSettings,
     settingsStore,
   } from "../lib/stores/settings.svelte";
-  import type { BootstrapEntry, DialModes } from "../lib/types-settings-stub";
+  import type { BootstrapEntry, DialMode } from "../lib/types-settings-stub";
   import Button from "../lib/components/Button.svelte";
   import Card from "../lib/components/Card.svelte";
-  import Toggle from "../lib/components/Toggle.svelte";
   import { toast } from "../lib/components/toast.svelte";
   import { log } from "../lib/log";
 
   const logger = log("Settings");
 
   // Local editable copy — committed on save.
-  let dialModes = $state<DialModes>({
-    lan: true,
-    internet: true,
-    relay: true,
-    p2p: false,
-  });
+  let dialMode = $state<DialMode>("Internet");
 
   // Local editable rows; mirrors `settingsStore.bootstraps` plus optional
   // empty/in-progress rows the user has added with the "+ add" button.
@@ -55,7 +49,7 @@
       settingsStore.loadedOnce &&
       settingsStore.settings !== null
     ) {
-      dialModes = { ...settingsStore.settings.dial_modes };
+      dialMode = settingsStore.settings.dial_mode;
       rows = settingsStore.bootstraps.map((b) => ({ ...b }));
       hydrated = true;
       logger.debug("hydrated from store");
@@ -77,42 +71,21 @@
     });
   }
 
-  // ── derived: active strategy label ────────────────────────────────────────
-  const strategyLabel = $derived(deriveStrategy(dialModes));
+  // ── derived: descriptive line below the mode pills ───────────────────────
+  const modeDescription = $derived(describeMode(dialMode));
 
-  function deriveStrategy(m: DialModes): string {
-    const { lan, internet, relay, p2p } = m;
-    const sel = [
-      lan && "lan",
-      internet && "internet",
-      relay && "relay",
-      p2p && "p2p",
-    ].filter(Boolean) as string[];
-    if (sel.length === 0) return "nothing selected — you won't connect to anyone";
-    if (lan && !internet && !relay && !p2p)
-      return "lan only — peers must be on the same wifi";
-    if (lan && internet && !relay && !p2p)
-      return "direct only — works if both peers are publicly reachable";
-    if (!lan && !internet && relay && !p2p)
-      return "relay-only — slower but works through any nat";
-    if (lan && internet && relay && !p2p)
-      return "auto — tries direct first, falls back to relay";
-    if (!lan && !internet && !relay && p2p)
-      return "p2p only — not yet implemented (placeholder for v2-a5)";
-    if (p2p && relay && !lan && !internet)
-      return "p2p preferred, relay fallback (p2p coming soon)";
-    if (lan && relay && !internet && !p2p)
-      return "lan + relay — same-wifi peers direct, others through relay";
-    if (internet && relay && !lan && !p2p)
-      return "internet + relay — direct on open networks, relay fallback";
-    return `custom mix (${sel.join(" + ")})`;
+  function describeMode(m: DialMode): string {
+    switch (m) {
+      case "LanOnly":
+        return "lan only — peers must be on the same wifi network";
+      case "Internet":
+        return "internet — finds peers through a bootstrap server, falls back to relay when direct dial fails";
+      case "P2p":
+        return "p2p — direct peer-to-peer (hole-punching not yet implemented; behaves like internet for now)";
+    }
   }
 
   // ── derived: dirty / save-disabled ────────────────────────────────────────
-  const hasModeSelected = $derived(
-    dialModes.lan || dialModes.internet || dialModes.relay || dialModes.p2p,
-  );
-
   const allMultiaddrsValid = $derived(
     rows.every((r) => r.is_default || r.multiaddr.trim().length === 0 || isLikelyMultiaddr(r.multiaddr)),
   );
@@ -120,18 +93,8 @@
   const dirty = $derived(
     hydrated &&
       settingsStore.settings !== null &&
-      (modesEqual(dialModes, settingsStore.settings.dial_modes) === false ||
-        extraBootstrapsDirty()),
+      (dialMode !== settingsStore.settings.dial_mode || extraBootstrapsDirty()),
   );
-
-  function modesEqual(a: DialModes, b: DialModes): boolean {
-    return (
-      a.lan === b.lan &&
-      a.internet === b.internet &&
-      a.relay === b.relay &&
-      a.p2p === b.p2p
-    );
-  }
 
   function extraBootstrapsDirty(): boolean {
     if (settingsStore.settings === null) return false;
@@ -156,9 +119,9 @@
   }
 
   // ── handlers ──────────────────────────────────────────────────────────────
-  function toggleMode(key: keyof DialModes, next: boolean): void {
-    dialModes = { ...dialModes, [key]: next };
-    logger.debug("toggle", key, "->", String(next));
+  function selectMode(next: DialMode): void {
+    dialMode = next;
+    logger.debug("mode ->", next);
   }
 
   function addRow(): void {
@@ -186,10 +149,6 @@
   }
 
   async function onSave(): Promise<void> {
-    if (!hasModeSelected) {
-      toast.error("select at least one connection mode");
-      return;
-    }
     if (!allMultiaddrsValid) {
       toast.error("one or more bootstrap multiaddrs look malformed");
       return;
@@ -198,9 +157,9 @@
       .filter((r) => !r.is_default)
       .map((r) => r.multiaddr.trim())
       .filter((s) => s.length > 0);
-    logger.info("saving", `dial_modes=${JSON.stringify(dialModes)}`, `extras=${extras.length}`);
+    logger.info("saving", `dial_mode=${dialMode}`, `extras=${extras.length}`);
     try {
-      await saveSettings({ ...dialModes }, extras);
+      await saveSettings(dialMode, extras);
       toast.success("settings saved");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -239,7 +198,6 @@
   function extractHost(multiaddr: string): string | null {
     // /dns4/<host>/tcp/<port>/p2p/<peer-id>
     const parts = multiaddr.split("/");
-    // [ "", "dns4", "host", "tcp", "port", "p2p", "peer" ]
     const idx = parts.findIndex(
       (p) => p === "dns4" || p === "dns6" || p === "ip4" || p === "ip6",
     );
@@ -259,6 +217,12 @@
     if (r.last_ping_ms === null) return "—";
     return `${r.last_ping_ms} ms`;
   }
+
+  const MODES: { value: DialMode; label: string }[] = [
+    { value: "LanOnly", label: "lan only" },
+    { value: "Internet", label: "internet" },
+    { value: "P2p", label: "p2p" },
+  ];
 </script>
 
 <section class="page">
@@ -272,39 +236,23 @@
       <p class="msg err">{settingsStore.error}</p>
     {/if}
 
-    <!-- ── connection modes ───────────────────────────────────────────── -->
-    <Card title="connection modes">
-      <div class="chips">
-        <Toggle
-          label="lan"
-          checked={dialModes.lan}
-          onchange={(v) => toggleMode("lan", v)}
-        />
-        <Toggle
-          label="internet"
-          checked={dialModes.internet}
-          onchange={(v) => toggleMode("internet", v)}
-        />
-        <Toggle
-          label="relay"
-          checked={dialModes.relay}
-          onchange={(v) => toggleMode("relay", v)}
-        />
-        <Toggle
-          label="p2p"
-          checked={dialModes.p2p}
-          onchange={(v) => toggleMode("p2p", v)}
-        />
+    <!-- ── connection mode ────────────────────────────────────────────── -->
+    <Card title="connection mode">
+      <div class="pills" role="radiogroup" aria-label="connection mode">
+        {#each MODES as opt}
+          <button
+            type="button"
+            class="pill"
+            class:active={dialMode === opt.value}
+            role="radio"
+            aria-checked={dialMode === opt.value}
+            onclick={() => selectMode(opt.value)}
+          >
+            {opt.label}
+          </button>
+        {/each}
       </div>
-      <p class="hint">
-        at least one must be selected. relay routes through bootstrap servers;
-        p2p is an experimental hole-punching mode that is not yet implemented
-        (it's a placeholder for v2-a5).
-      </p>
-      <p class="strategy">
-        <span class="strategy-label">active strategy:</span>
-        <span class="strategy-text">{strategyLabel}</span>
-      </p>
+      <p class="hint">{modeDescription}</p>
     </Card>
 
     <!-- ── bootstrap nodes ────────────────────────────────────────────── -->
@@ -368,10 +316,7 @@
     <div class="action-bar">
       <Button
         variant="primary"
-        disabled={settingsStore.saving ||
-          !hasModeSelected ||
-          !allMultiaddrsValid ||
-          !dirty}
+        disabled={settingsStore.saving || !allMultiaddrsValid || !dirty}
         title="save settings"
         onclick={() => {
           void onSave();
@@ -428,37 +373,47 @@
     text-transform: lowercase;
   }
 
-  .chips {
+  .pills {
     display: flex;
     flex-wrap: wrap;
     gap: var(--y7-sp-2);
   }
+  .pill {
+    padding: var(--y7-sp-2) var(--y7-sp-4);
+    background: transparent;
+    border: 1px solid var(--y7-border-default);
+    border-radius: var(--y7-r-full);
+    color: var(--y7-text-secondary);
+    font-family: var(--y7-font-mono);
+    font-size: var(--y7-fs-sm);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition:
+      background-color var(--y7-dur-fast) var(--y7-ease),
+      border-color var(--y7-dur-fast) var(--y7-ease),
+      color var(--y7-dur-fast) var(--y7-ease);
+  }
+  .pill:hover {
+    border-color: var(--y7-border-strong);
+    color: var(--y7-text-primary);
+  }
+  .pill.active {
+    background: var(--y7-accent);
+    border-color: var(--y7-accent);
+    color: var(--y7-text-on-accent, #000);
+  }
+  .pill:focus-visible {
+    outline: none;
+    border-color: var(--y7-border-focus);
+  }
+
   .hint {
     margin: var(--y7-sp-3) 0 0;
     font-size: var(--y7-fs-sm);
     color: var(--y7-text-muted);
     line-height: var(--y7-lh-relaxed);
     text-transform: lowercase;
-  }
-  .strategy {
-    margin: var(--y7-sp-3) 0 0;
-    padding: var(--y7-sp-2) var(--y7-sp-3);
-    background: var(--y7-bg-base);
-    border: 1px solid var(--y7-border-subtle);
-    border-radius: var(--y7-r-sm);
-    font-size: var(--y7-fs-sm);
-    text-transform: lowercase;
-    display: flex;
-    gap: var(--y7-sp-2);
-    align-items: baseline;
-    flex-wrap: wrap;
-  }
-  .strategy-label {
-    color: var(--y7-text-muted);
-    letter-spacing: 0.04em;
-  }
-  .strategy-text {
-    color: var(--y7-text-primary);
   }
 
   .rows {
