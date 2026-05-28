@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.55] — 2026-05-28
+
+- feat(net): ApplyDialMode command + live LAN-only switch in swarm
+
 ## [0.1.54] — 2026-05-28
 
 - feat(core+storage): replace DialModes with mutually-exclusive DialMode enum

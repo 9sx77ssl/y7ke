@@ -88,7 +88,17 @@ impl AppHandle {
         let keypair = libp2p_keypair_from_y7_secret(&secret)?;
         let swarm = build_swarm(keypair)?;
         let bootstraps = crate::config::load_bootstraps(&db).await;
-        let net = spawn_swarm_with_bootstraps(swarm, bootstraps);
+        // Start the swarm in the user's persisted mode so a LanOnly user
+        // doesn't briefly leak a bootstrap dial before the first
+        // apply_dial_mode would land.
+        let initial_mode = match db.settings().get().await {
+            Ok(s) => s.dial_mode,
+            Err(e) => {
+                tracing::warn!(error = %e, "settings.get failed at boot; using default mode");
+                y7ke_core::settings::DialMode::default()
+            }
+        };
+        let net = spawn_swarm_with_bootstraps(swarm, bootstraps, initial_mode);
         let event_rx_for_loop = net.try_clone_event_rx();
 
         let inner = Arc::new(AppInner {

@@ -19,15 +19,37 @@ impl AppHandle {
         self.inner.db.settings().get().await
     }
 
-    /// Persist `settings`, push the new bootstrap list to the swarm, and
-    /// emit `AppEvent::SettingsChanged`.
+    /// Persist `settings`, push the new bootstrap list to the swarm, apply
+    /// any `dial_mode` change live, and emit `AppEvent::SettingsChanged`.
     pub async fn update_settings(&self, settings: Settings) -> Result<()> {
+        let prev = self.inner.db.settings().get().await.ok();
         self.inner.db.settings().update(&settings).await?;
 
         // Reuse the same loader so env-var / file precedence is preserved.
         let addrs = crate::config::load_bootstraps(&self.inner.db).await;
         if let Err(e) = self.inner.net.update_bootstraps(addrs).await {
             tracing::warn!(error = %e, "swarm rejected update_bootstraps");
+        }
+
+        // Live-apply if dial_mode actually changed.
+        let mode_changed = prev
+            .as_ref()
+            .map(|p| p.dial_mode != settings.dial_mode)
+            .unwrap_or(true);
+        if mode_changed {
+            if let Err(e) = self.inner.net.apply_dial_mode(settings.dial_mode).await {
+                tracing::warn!(error = %e, "swarm rejected apply_dial_mode");
+            }
+            // Best-effort: bump presence to Offline for every contact so
+            // the UI re-resolves now that connectivity rules have flipped.
+            if let Ok(contacts) = self.inner.db.contacts().list().await {
+                for c in contacts {
+                    let _ = self.event_tx.send(AppEvent::PresenceChanged {
+                        y7_id: c.y7_id.to_uri(),
+                        connection: y7ke_core::ConnectionKind::Offline,
+                    });
+                }
+            }
         }
 
         let _ = self.event_tx.send(AppEvent::SettingsChanged);
@@ -218,7 +240,7 @@ where
 mod tests {
     use crate::{AppConfig, AppHandle};
     use tempfile::TempDir;
-    use y7ke_core::settings::{DialModes, Settings, DEFAULT_RELAY_BOOTSTRAP};
+    use y7ke_core::settings::{DialMode, Settings, DEFAULT_RELAY_BOOTSTRAP};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn update_get_list_round_trip() {
@@ -228,23 +250,18 @@ mod tests {
             .unwrap();
 
         let initial = app.get_settings().await.unwrap();
-        assert_eq!(initial.dial_modes, DialModes::default());
+        assert_eq!(initial.dial_mode, DialMode::default());
         assert!(initial.extra_bootstraps.is_empty());
 
         let extra = "/ip4/127.0.0.1/tcp/9999/p2p/12D3KooWAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa";
         let updated = Settings {
-            dial_modes: DialModes {
-                lan: false,
-                internet: true,
-                relay: true,
-                p2p: false,
-            },
+            dial_mode: DialMode::Internet,
             extra_bootstraps: vec![extra.into()],
         };
         app.update_settings(updated.clone()).await.unwrap();
 
         let got = app.get_settings().await.unwrap();
-        assert_eq!(got.dial_modes, updated.dial_modes);
+        assert_eq!(got.dial_mode, updated.dial_mode);
         assert_eq!(got.extra_bootstraps, updated.extra_bootstraps);
 
         let list = app.list_bootstraps().await.unwrap();
