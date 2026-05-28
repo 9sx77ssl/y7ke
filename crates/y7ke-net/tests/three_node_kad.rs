@@ -44,7 +44,7 @@ async fn run_kad_discovery() {
     // Boot the bootstrap first so its listen addr is known before alice
     // and bob get their bootstraps wired in.
     let bootstrap_swarm = build_swarm(bootstrap_kp).expect("build bootstrap");
-    let mut bootstrap = spawn_swarm_with_bootstraps(bootstrap_swarm, Vec::new());
+    let mut bootstrap = spawn_swarm_with_bootstraps(bootstrap_swarm, Vec::new(), y7ke_core::settings::DialMode::Internet);
     let bootstrap_listen = wait_for_listening(bootstrap.event_rx()).await;
     let bootstrap_multiaddr: Multiaddr = format!("{bootstrap_listen}/p2p/{bootstrap_peer}")
         .parse()
@@ -55,8 +55,8 @@ async fn run_kad_discovery() {
     // so Kad seeds the routing table before any user-driven dial.
     let alice_swarm = build_swarm(alice_kp).expect("build alice");
     let bob_swarm = build_swarm(bob_kp).expect("build bob");
-    let mut alice = spawn_swarm_with_bootstraps(alice_swarm, vec![bootstrap_multiaddr.clone()]);
-    let mut bob = spawn_swarm_with_bootstraps(bob_swarm, vec![bootstrap_multiaddr.clone()]);
+    let mut alice = spawn_swarm_with_bootstraps(alice_swarm, vec![bootstrap_multiaddr.clone()], y7ke_core::settings::DialMode::Internet);
+    let mut bob = spawn_swarm_with_bootstraps(bob_swarm, vec![bootstrap_multiaddr.clone()], y7ke_core::settings::DialMode::Internet);
 
     let _alice_listen = wait_for_listening(alice.event_rx()).await;
     let _bob_listen = wait_for_listening(bob.event_rx()).await;

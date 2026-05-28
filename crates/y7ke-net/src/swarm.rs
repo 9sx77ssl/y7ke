@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use libp2p::{
-    core::ConnectedPoint,
+    core::{transport::ListenerId, ConnectedPoint},
     dcutr, identify, identity, kad, mdns, noise, relay,
     request_response::{self, OutboundRequestId},
     swarm::SwarmEvent,
@@ -26,6 +26,7 @@ use libp2p::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
 
+use y7ke_core::settings::DialMode;
 use y7ke_core::{AppError, ConnectionKind, Y7Id};
 
 use crate::behaviour::{Y7Behaviour, Y7BehaviourEvent};
@@ -108,7 +109,7 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
 /// `tokio::select!` until either every `NetHandle` clone is dropped (the
 /// command channel closes) or `NetCommand::Shutdown` is received.
 pub fn spawn_swarm(swarm: Swarm<Y7Behaviour>) -> NetHandle {
-    spawn_swarm_with_bootstraps(swarm, Vec::new())
+    spawn_swarm_with_bootstraps(swarm, Vec::new(), DialMode::default())
 }
 
 /// Like [`spawn_swarm`] but seeds the Kademlia routing table with the
@@ -119,6 +120,7 @@ pub fn spawn_swarm(swarm: Swarm<Y7Behaviour>) -> NetHandle {
 pub fn spawn_swarm_with_bootstraps(
     mut swarm: Swarm<Y7Behaviour>,
     bootstraps: Vec<Multiaddr>,
+    initial_mode: DialMode,
 ) -> NetHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<NetCommand>(COMMAND_CHANNEL_CAPACITY);
     let (event_tx, event_rx) = broadcast::channel::<NetEvent>(EVENT_CHANNEL_CAPACITY);
@@ -147,15 +149,19 @@ pub fn spawn_swarm_with_bootstraps(
         });
     }
 
-    // Seed the Kad routing table from configured bootstraps before
-    // entering the loop. We don't dial yet — Kad's `bootstrap()` call
-    // (issued once a peer is in the table) does that for us.
+    // Seed the Kad routing table from configured bootstraps. We always
+    // record the peer→addr map so a later mode switch can pick them up,
+    // but only dial + bootstrap when not in LanOnly mode.
+    let lan_only = matches!(initial_mode, DialMode::LanOnly);
     let mut bootstrap_peers: HashMap<PeerId, Multiaddr> = HashMap::new();
     for addr in &bootstraps {
         match peer_id_from_multiaddr(addr) {
             Some(peer) => {
-                swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
                 bootstrap_peers.insert(peer, addr.clone());
+                if lan_only {
+                    continue;
+                }
+                swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
                 let class = addr_class(addr);
                 if let Err(e) = swarm.dial(addr.clone()) {
                     warn!(%addr, class, "bootstrap dial failed: {e}");
@@ -171,13 +177,26 @@ pub fn spawn_swarm_with_bootstraps(
             }
         }
     }
-    if !bootstraps.is_empty() {
+    if !bootstraps.is_empty() && !lan_only {
         if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
             warn!("kad.bootstrap() failed: {e}");
         }
     }
+    if lan_only {
+        // Don't advertise providing while LAN-only.
+        swarm
+            .behaviour_mut()
+            .kad
+            .set_mode(Some(kad::Mode::Client));
+    }
 
-    tokio::spawn(run_swarm(swarm, cmd_rx, event_tx_for_task, bootstrap_peers));
+    tokio::spawn(run_swarm(
+        swarm,
+        cmd_rx,
+        event_tx_for_task,
+        bootstrap_peers,
+        initial_mode,
+    ));
 
     NetHandle {
         cmd_tx,
@@ -193,9 +212,11 @@ async fn run_swarm(
     mut cmd_rx: mpsc::Receiver<NetCommand>,
     event_tx: broadcast::Sender<NetEvent>,
     bootstrap_peers: HashMap<PeerId, Multiaddr>,
+    initial_mode: DialMode,
 ) {
     let mut state = TaskState {
         bootstrap_peers,
+        dial_mode: initial_mode,
         ..TaskState::default()
     };
 
@@ -234,7 +255,9 @@ async fn run_swarm(
             }
 
             _ = reconnect_tick.tick() => {
-                reconnect_lost_bootstraps(&mut swarm, &state);
+                if !matches!(state.dial_mode, DialMode::LanOnly) {
+                    reconnect_lost_bootstraps(&mut swarm, &state);
+                }
             }
         }
     }
@@ -291,6 +314,15 @@ struct TaskState {
     /// for in this task's lifetime — guards against re-issuing every
     /// time the connection drops and reconnects.
     relay_reserved: HashSet<PeerId>,
+
+    /// `/p2p-circuit` listeners we successfully started, keyed by the
+    /// relay PeerId. Tracked so `ApplyDialMode(LanOnly)` can call
+    /// `swarm.remove_listener(listener_id)` to tear them down.
+    circuit_listeners: HashMap<PeerId, ListenerId>,
+
+    /// Current live `DialMode`. Mirrors the user's setting; flipped by
+    /// `NetCommand::ApplyDialMode`.
+    dial_mode: DialMode,
 }
 
 impl TaskState {
@@ -460,9 +492,14 @@ fn handle_command(
                     warn!(%addr, "update_bootstraps: addr missing /p2p/<peer-id>; ignoring");
                 }
             }
-            // Seed Kad + dial anything new.
+            // Seed Kad + dial anything new. While LanOnly we only update
+            // the recorded map and skip dialing.
+            let lan_only = matches!(state.dial_mode, DialMode::LanOnly);
             for (peer, addr) in &next {
                 if state.bootstrap_peers.contains_key(peer) {
+                    continue;
+                }
+                if lan_only {
                     continue;
                 }
                 swarm.behaviour_mut().kad.add_address(peer, addr.clone());
@@ -474,9 +511,60 @@ fn handle_command(
                 }
             }
             state.bootstrap_peers = next;
-            if !state.bootstrap_peers.is_empty() {
+            if !lan_only && !state.bootstrap_peers.is_empty() {
                 if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
                     debug!("update_bootstraps: kad.bootstrap() failed: {e}");
+                }
+            }
+        }
+
+        NetCommand::ApplyDialMode { mode } => {
+            let prev = state.dial_mode;
+            state.dial_mode = mode;
+            info!(?prev, next = ?mode, "applying dial_mode");
+            match mode {
+                DialMode::LanOnly => {
+                    // Tear down every active circuit listener.
+                    let listener_ids: Vec<(PeerId, ListenerId)> =
+                        state.circuit_listeners.drain().collect();
+                    for (peer, lid) in listener_ids {
+                        if swarm.remove_listener(lid) {
+                            info!(%peer, ?lid, "relay: dropped circuit listener");
+                        }
+                    }
+                    state.relay_reserved.clear();
+                    // Disconnect bootstrap peers.
+                    let peers: Vec<PeerId> = state.bootstrap_peers.keys().copied().collect();
+                    for peer in peers {
+                        let _ = swarm.disconnect_peer_id(peer);
+                        debug!(%peer, "lan-only: disconnecting bootstrap");
+                    }
+                    // Move Kad to Client mode so we don't advertise.
+                    swarm
+                        .behaviour_mut()
+                        .kad
+                        .set_mode(Some(kad::Mode::Client));
+                    state.provided_self = false;
+                }
+                DialMode::Internet | DialMode::P2p => {
+                    // Re-enable Kad advertising; routing-updated will
+                    // start_providing again next time it fires.
+                    swarm
+                        .behaviour_mut()
+                        .kad
+                        .set_mode(Some(kad::Mode::Server));
+                    // Re-seed Kad + immediately probe bootstraps so the
+                    // user doesn't wait BOOTSTRAP_RECONNECT_INTERVAL for
+                    // the first dial.
+                    for (peer, addr) in state.bootstrap_peers.clone() {
+                        swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
+                    }
+                    reconnect_lost_bootstraps(swarm, state);
+                    if !state.bootstrap_peers.is_empty() {
+                        if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+                            debug!("apply_dial_mode: kad.bootstrap() failed: {e}");
+                        }
+                    }
                 }
             }
         }
@@ -530,14 +618,22 @@ async fn handle_swarm_event(
             // V2-A4: bootstrap connections double as relay servers. Ask
             // the relay client to listen on `/p2p-circuit` via this
             // bootstrap so other clients can dial us through it.
-            if let Some(bootstrap_addr) = state.bootstrap_peers.get(&peer_id).cloned() {
-                if state.relay_reserved.insert(peer_id) {
-                    let circuit_addr = bootstrap_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
-                    match swarm.listen_on(circuit_addr.clone()) {
-                        Ok(_) => info!(%peer_id, %circuit_addr, "relay: requesting reservation"),
-                        Err(e) => {
-                            state.relay_reserved.remove(&peer_id);
-                            warn!(%peer_id, error = %e, "relay: listen_on circuit failed");
+            // Skipped while LanOnly — a circuit listen has no point if
+            // we're not soliciting internet traffic.
+            if !matches!(state.dial_mode, DialMode::LanOnly) {
+                if let Some(bootstrap_addr) = state.bootstrap_peers.get(&peer_id).cloned() {
+                    if state.relay_reserved.insert(peer_id) {
+                        let circuit_addr =
+                            bootstrap_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
+                        match swarm.listen_on(circuit_addr.clone()) {
+                            Ok(lid) => {
+                                state.circuit_listeners.insert(peer_id, lid);
+                                info!(%peer_id, %circuit_addr, ?lid, "relay: requesting reservation");
+                            }
+                            Err(e) => {
+                                state.relay_reserved.remove(&peer_id);
+                                warn!(%peer_id, error = %e, "relay: listen_on circuit failed");
+                            }
                         }
                     }
                 }
@@ -550,6 +646,12 @@ async fn handle_swarm_event(
             // the next reconnect re-runs `listen_on(<addr>/p2p-circuit)`.
             if state.bootstrap_peers.contains_key(&peer_id) {
                 state.relay_reserved.remove(&peer_id);
+                if let Some(lid) = state.circuit_listeners.remove(&peer_id) {
+                    // The listener self-terminates when the underlying
+                    // connection drops; calling remove_listener defends
+                    // against the rare case where it lingers.
+                    swarm.remove_listener(lid);
+                }
             }
             emit(event_tx, NetEvent::ConnectionClosed { peer: peer_id });
         }

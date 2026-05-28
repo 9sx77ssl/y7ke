@@ -40,7 +40,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("bootstrap  = {bootstrap}");
 
     let swarm = build_swarm(keypair)?;
-    let mut net = spawn_swarm_with_bootstraps(swarm, vec![bootstrap.clone()]);
+    let mut net = spawn_swarm_with_bootstraps(
+        swarm,
+        vec![bootstrap.clone()],
+        y7ke_core::settings::DialMode::Internet,
+    );
 
     let mut saw_connection = false;
     let outcome = timeout(RESERVATION_BUDGET, async {

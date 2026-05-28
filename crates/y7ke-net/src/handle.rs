@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex};
 use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use y7ke_core::settings::DialMode;
 use y7ke_core::{AppError, ConnectionKind, Y7Id};
 
 use crate::protocol::{HandshakeReq, HandshakeResp, MsgReq, MsgResp, SyncReq, SyncResp};
@@ -308,6 +309,16 @@ impl NetHandle {
             .map_err(|e| AppError::network(format!("command channel closed: {e}")))
     }
 
+    /// Switch the swarm to a new `DialMode` immediately. `LanOnly` drops
+    /// circuit listeners + disconnects bootstraps; `Internet`/`P2p`
+    /// re-dial bootstraps and re-request relay reservations on connect.
+    pub async fn apply_dial_mode(&self, mode: DialMode) -> Result<(), AppError> {
+        self.cmd_tx
+            .send(NetCommand::ApplyDialMode { mode })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))
+    }
+
     /// Cheap, network-free check: does the swarm currently hold any
     /// active connection to `y7_id`? Used by the periodic presence
     /// ticker to spot peers whose socket has died without a
@@ -409,6 +420,10 @@ pub enum NetCommand {
         y7_id: Y7Id,
         response_tx: oneshot::Sender<Result<bool, AppError>>,
     },
+    /// Switch the live `DialMode`. Triggers immediate side-effects:
+    /// `LanOnly` drops `/p2p-circuit` listeners + disconnects bootstraps;
+    /// `Internet`/`P2p` re-enable bootstrap reconnect and relay reservations.
+    ApplyDialMode { mode: DialMode },
     /// Stop the swarm task.
     Shutdown,
 }
