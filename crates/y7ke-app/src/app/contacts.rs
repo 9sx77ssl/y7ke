@@ -102,10 +102,10 @@ impl AppHandle {
             return;
         }
         if modes.p2p {
-            tracing::info!(
-                %peer,
-                "p2p hole-punching requested but not implemented yet (V2-A5)"
-            );
+            // V2-A5: DCUtR is wired at the swarm layer — once a relay
+            // path is established the upgrade is automatic. No
+            // application-level trigger needed.
+            tracing::debug!(%peer, "p2p hole-punching enabled (DCUtR auto-trigger via swarm)");
         }
 
         // 1. Fast path: swarm address book. When `lan` is off we still
@@ -134,9 +134,11 @@ impl AppHandle {
                 if let Ok(addrs) = serde_json::from_str::<Vec<String>>(&json) {
                     let parsed: Vec<libp2p::Multiaddr> =
                         addrs.iter().filter_map(|s| s.parse().ok()).collect();
-                    let filtered = filter_addrs_by_mode(parsed, &modes);
+                    let prioritised = y7ke_net::sort_addrs_for_dial(parsed);
+                    let filtered = filter_addrs_by_mode(prioritised, &modes);
                     tracing::info!(%peer, count = filtered.len(), "discovery: step 2 — trying cached addrs");
                     for m in filtered {
+                        tracing::debug!(%peer, addr = %m, "dial chose cached addr");
                         if self.inner.net.dial_address(m).await.is_ok() {
                             tracing::info!(%peer, "discovery: step 2 cached addr dial issued");
                             return;
@@ -151,15 +153,14 @@ impl AppHandle {
         tracing::info!(%peer, "discovery: step 3 — Kad get_providers query");
         match self.inner.net.find_peer(peer).await {
             Ok(addrs) => {
-                let mut filtered = filter_addrs_by_mode(addrs, &modes);
-                // Prefer direct (non-circuit, non-LAN-only) first, then
-                // circuit (relay) fallbacks, with LAN-looking addrs
-                // last — Kad can return both the peer's public addr
-                // AND its 192.168.x.x interface, and the latter won't
-                // reach across NATs.
-                filtered.sort_by_key(sort_addr_priority);
-                tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter + sort)");
+                // V2-A5/A6: order direct QUIC > direct TCP > relay so
+                // hole-punch-capable direct paths are tried before we
+                // burn relay bandwidth.
+                let prioritised = y7ke_net::sort_addrs_for_dial(addrs);
+                let filtered = filter_addrs_by_mode(prioritised, &modes);
+                tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter)");
                 for addr in filtered {
+                    tracing::debug!(%peer, %addr, "dial chose addr");
                     if self.inner.net.dial_address(addr).await.is_ok() {
                         return;
                     }

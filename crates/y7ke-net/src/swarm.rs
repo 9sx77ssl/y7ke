@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use libp2p::{
     core::ConnectedPoint,
-    identify, identity, kad, mdns, noise, relay,
+    dcutr, identify, identity, kad, mdns, noise, relay,
     request_response::{self, OutboundRequestId},
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -45,8 +45,12 @@ pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo",
 ];
 
-/// Default listen address (random TCP port on all interfaces).
+/// Default TCP listen address (random port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
+
+/// Default QUIC (v1) listen address (random UDP port on all interfaces).
+/// V2-A6 — bound in parallel with the TCP listener.
+pub const DEFAULT_QUIC_LISTEN_ADDR: &str = "/ip4/0.0.0.0/udp/0/quic-v1";
 
 /// Idle connection timeout. Connections with no active substream are
 /// dropped after this period.
@@ -79,6 +83,9 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<Y7Behaviour>, App
             yamux::Config::default,
         )
         .map_err(|e| AppError::network(format!("tcp/noise/yamux setup: {e}")))?
+        // V2-A6: QUIC alongside TCP. libp2p-quic provides its own Noise +
+        // muxer, so no upgrade closures are needed here.
+        .with_quic()
         .with_dns()
         .map_err(|e| AppError::network(format!("dns transport setup: {e}")))?
         .with_relay_client(noise::Config::new, yamux::Config::default)
@@ -125,6 +132,18 @@ pub fn spawn_swarm_with_bootstraps(
         warn!("failed to start listener on {DEFAULT_LISTEN_ADDR}: {e}");
         let _ = event_tx.send(NetEvent::Error {
             message: format!("listen_on({DEFAULT_LISTEN_ADDR}) failed: {e}"),
+        });
+    }
+    // V2-A6: bind QUIC in parallel. Best-effort — if UDP/0 fails (e.g.
+    // sandbox without UDP), TCP remains operational.
+    if let Err(e) = swarm.listen_on(
+        DEFAULT_QUIC_LISTEN_ADDR
+            .parse()
+            .expect("compile-time constant multiaddr"),
+    ) {
+        warn!("failed to start listener on {DEFAULT_QUIC_LISTEN_ADDR}: {e}");
+        let _ = event_tx.send(NetEvent::Error {
+            message: format!("listen_on({DEFAULT_QUIC_LISTEN_ADDR}) failed: {e}"),
         });
     }
 
@@ -590,9 +609,34 @@ async fn handle_swarm_event(
             handle_relay_client(event);
         }
 
+        SwarmEvent::Behaviour(Y7BehaviourEvent::Dcutr(event)) => {
+            handle_dcutr(event_tx, event);
+        }
+
         _ => {
             // Other variants (Dialing, IncomingConnection, ExternalAddr*, ...) are
             // not load-bearing in V1.
+        }
+    }
+}
+
+/// V2-A5: forward DCUtR upgrade outcomes to the app layer. On success
+/// the swarm has a fresh direct connection to the peer; on failure the
+/// existing relayed connection stays in place untouched.
+fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
+    match event.result {
+        Ok(_conn_id) => {
+            info!(peer = %event.remote_peer_id, "dcutr: direct upgrade succeeded");
+            emit(
+                event_tx,
+                NetEvent::ConnectionUpgraded {
+                    peer: event.remote_peer_id,
+                    kind: ConnectionKind::Direct,
+                },
+            );
+        }
+        Err(e) => {
+            info!(peer = %event.remote_peer_id, error = %e, "dcutr: direct upgrade failed (staying on relay)");
         }
     }
 }

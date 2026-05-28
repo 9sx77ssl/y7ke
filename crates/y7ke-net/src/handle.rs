@@ -437,6 +437,11 @@ pub enum NetEvent {
     /// Connection torn down. The application layer should mark the peer
     /// offline / move pending sends back to the retry queue.
     ConnectionClosed { peer: PeerId },
+    /// DCUtR (V2-A5) reported a successful direct-connection upgrade. The
+    /// underlying relayed circuit is still around briefly while libp2p
+    /// folds traffic over to the new direct path; the application layer
+    /// should bump presence to `kind = Direct` immediately.
+    ConnectionUpgraded { peer: PeerId, kind: ConnectionKind },
     /// Inbound handshake request awaiting a response.
     HandshakeReceived {
         peer: PeerId,

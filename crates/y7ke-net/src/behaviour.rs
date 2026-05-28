@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use libp2p::{
-    identify,
+    dcutr, identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
     mdns, ping, relay,
@@ -50,6 +50,12 @@ pub struct Y7Behaviour {
     /// configured bootstrap and accept inbound dials via `p2p-circuit`
     /// when both peers are NAT'd.
     pub relay_client: relay::client::Behaviour,
+    /// DCUtR — V2-A5. Hole-punches a direct connection once a `Relayed`
+    /// link to the peer exists and identify has advertised observed
+    /// addresses on both sides. The upgraded direct stream re-runs Noise
+    /// XX with the same Ed25519 keypair, so the libp2p PeerId still
+    /// matches — no app-layer revalidation is required.
+    pub dcutr: dcutr::Behaviour,
 }
 
 impl Y7Behaviour {
@@ -115,6 +121,8 @@ impl Y7Behaviour {
             kad::Behaviour::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_cfg);
         kad.set_mode(Some(kad::Mode::Server));
 
+        let dcutr = dcutr::Behaviour::new(local_peer_id);
+
         Ok(Self {
             identify,
             ping,
@@ -124,6 +132,7 @@ impl Y7Behaviour {
             sync,
             kad,
             relay_client,
+            dcutr,
         })
     }
 }

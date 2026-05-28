@@ -9,7 +9,19 @@ versioning is [SemVer](https://semver.org/).
 
 ## [0.1.52] — 2026-05-28
 
-- chore(net): structured dial debug logging (addr_class)
+- feat(app): direct-first dial priority
+
+## [0.1.51] — 2026-05-28
+
+- feat(net): DCUtR behaviour (V2-A5)
+
+## [0.1.50] — 2026-05-28
+
+- feat(net): NetEvent::ConnectionUpgraded
+
+## [0.1.49] — 2026-05-28
+
+- feat(net): QUIC transport (V2-A6)
 
 ## [0.1.47] — 2026-05-28
 
