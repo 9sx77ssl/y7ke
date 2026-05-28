@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.76] — 2026-05-28
+
+- test(net): netns NAT-simulation harness for relay fallback (Phase 3.2)
+
 ## [0.1.75] — 2026-05-28
 
 - test(net): drive /y7ke/sync/1.0.0 over the relay circuit (Phase 3.1)

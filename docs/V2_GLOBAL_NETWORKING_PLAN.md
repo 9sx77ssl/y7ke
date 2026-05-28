@@ -762,7 +762,7 @@ beyond existing transitions.
 | `v2_sync_reconcile.rs` (sync via mDNS) | ✓ | unchanged |
 | sync via /p2p-circuit | ✓ folded into `four_node_relay.rs` (Phase 3.1) | extend with offline-queue drain |
 | `autonat_smoke.rs` (AutoNAT verdict) | — | **new — Phase 2 step 2** |
-| `v2_nat_sim.rs` (netns + iptables NAT classes) | — | **new — Phase 3 step 10** |
+| netns NAT sim (relay-required / blocked-path case) | ✓ `scripts/nat-sim/run.sh` + `nat_sim_node` example | add full-cone iptables variant for DCUtR-success |
 | `v2_transport_migration.rs` (IP change → QUIC migration) | — | **new — Phase 3 step 12** |
 | `live_relay_smoke` (live VPS) | ✓ TCP | extend with QUIC variant — Phase 2 step 5 |
 | **manual cross-network smoke** | — | **new — Phase 3 step 13, captured in this doc as ground truth** |
