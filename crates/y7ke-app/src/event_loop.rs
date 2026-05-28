@@ -456,7 +456,7 @@ async fn handle_msg(
     // inside /y7ke/msg to silently un-block itself or wipe the conversation.
     // This single chokepoint covers both (control is dispatched only after
     // this point). Ack=true so we don't leak the block state back to them.
-    if let Ok(Some(contact)) = inner.db.contacts().get(&sender_y7).await {
+    if let Some(contact) = inner.db.contacts().get(&sender_y7).await? {
         if contact.status == ContactStatus::Blocked {
             tracing::info!(%sender_y7, "dropping inbound msg/control from blocked peer");
             inner
@@ -583,6 +583,19 @@ async fn handle_sync(
             return Ok(());
         }
     };
+
+    // Enforce blocks here too (sibling of the handle_msg gate): a blocked
+    // peer must not Pull our outbound envelopes (confidentiality) nor Ack
+    // to flip our message statuses. Respond empty so block state isn't
+    // leaked back.
+    if let Some(contact) = inner.db.contacts().get(&requester_y7).await? {
+        if contact.status == ContactStatus::Blocked {
+            tracing::info!(%requester_y7, "dropping sync request from blocked peer");
+            let resp = empty_sync_resp_for(&request);
+            inner.net.respond_sync_take(channel, resp).await?;
+            return Ok(());
+        }
+    }
 
     let resp = match request {
         SyncReq::Header { conversations } => {
