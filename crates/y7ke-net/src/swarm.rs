@@ -624,16 +624,20 @@ async fn handle_swarm_event(
         }
 
         SwarmEvent::ConnectionEstablished {
-            peer_id, endpoint, ..
+            peer_id,
+            connection_id,
+            endpoint,
+            ..
         } => {
             let addr = endpoint.get_remote_address().clone();
             state.remember_address(peer_id, addr.clone());
             let kind = connection_kind_for(&endpoint);
-            info!(%peer_id, %addr, ?kind, "connection established");
+            info!(%peer_id, %addr, ?kind, ?connection_id, "connection established");
             emit(
                 event_tx,
                 NetEvent::ConnectionEstablished {
                     peer: peer_id,
+                    connection_id,
                     kind,
                     endpoint_addr: addr.clone(),
                 },
@@ -664,8 +668,13 @@ async fn handle_swarm_event(
             }
         }
 
-        SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-            info!(%peer_id, ?cause, "connection closed");
+        SwarmEvent::ConnectionClosed {
+            peer_id,
+            connection_id,
+            cause,
+            ..
+        } => {
+            info!(%peer_id, ?cause, ?connection_id, "connection closed");
             // Bootstrap dropped — clear the relay-reservation guard so
             // the next reconnect re-runs `listen_on(<addr>/p2p-circuit)`.
             if state.bootstrap_peers.contains_key(&peer_id) {
@@ -677,7 +686,13 @@ async fn handle_swarm_event(
                     swarm.remove_listener(lid);
                 }
             }
-            emit(event_tx, NetEvent::ConnectionClosed { peer: peer_id });
+            emit(
+                event_tx,
+                NetEvent::ConnectionClosed {
+                    peer: peer_id,
+                    connection_id,
+                },
+            );
         }
 
         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
@@ -755,12 +770,13 @@ async fn handle_swarm_event(
 /// existing relayed connection stays in place untouched.
 fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
     match event.result {
-        Ok(_conn_id) => {
-            info!(peer = %event.remote_peer_id, "dcutr: direct upgrade succeeded");
+        Ok(conn_id) => {
+            info!(peer = %event.remote_peer_id, ?conn_id, "dcutr: direct upgrade succeeded");
             emit(
                 event_tx,
                 NetEvent::ConnectionUpgraded {
                     peer: event.remote_peer_id,
+                    connection_id: conn_id,
                     kind: ConnectionKind::Direct,
                 },
             );

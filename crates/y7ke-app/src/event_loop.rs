@@ -6,9 +6,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use y7ke_core::crypto::VerifyingKey;
 use y7ke_core::error::Result;
-use y7ke_core::{
-    AppError, AppEvent, ConnectionKind, ContactStatus, ConversationId, MessageStatus, Y7Id,
-};
+use y7ke_core::{AppError, AppEvent, ContactStatus, ConversationId, MessageStatus, Y7Id};
 use y7ke_net::protocol::{ConversationDigest, MessageEnvelope, MsgResp, SyncReq, SyncResp};
 use y7ke_net::{NetEvent, PeerId};
 use y7ke_storage::dao::contacts::NewContact;
@@ -76,30 +74,30 @@ async fn dispatch(
         }
         NetEvent::ConnectionEstablished {
             peer,
+            connection_id,
             kind,
             endpoint_addr,
         } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
-                // Track every active kind for this peer; pick the best
-                // for the user-visible presence. Without this a Relayed
-                // ConnectionEstablished arriving after a LAN one would
-                // overwrite the LAN entry and the UI would flicker
-                // "Relayed" even though the LAN socket is still alive.
-                let best = {
-                    let mut kinds = inner.connection_kinds.write().await;
-                    let set = kinds.entry(y7).or_default();
-                    set.insert(kind);
-                    crate::app::best_kind(set)
+                // Record this connection by its id. A peer can hold
+                // several at once (LAN + relay, or relay + the new
+                // direct path mid-DCUtR-upgrade); keying by ConnectionId
+                // means a later close removes only the one that died.
+                let entry = crate::app::ConnEntry {
+                    kind,
+                    meta: crate::app::ConnectionMeta {
+                        via_host: crate::app::extract_relay_via_host(&endpoint_addr),
+                        transport: crate::app::extract_transport(&endpoint_addr),
+                    },
                 };
-                inner.presence.write().await.insert(y7, best);
-                // Connectivity-pane data: record via_host + transport
-                // for the best-kind path. Best-effort multiaddr parsing
-                // — a malformed addr just leaves the meta empty.
-                let meta = crate::app::ConnectionMeta {
-                    via_host: crate::app::extract_relay_via_host(&endpoint_addr),
-                    transport: crate::app::extract_transport(&endpoint_addr),
-                };
-                inner.connection_meta.write().await.insert(y7, meta);
+                inner
+                    .connections
+                    .write()
+                    .await
+                    .entry(y7)
+                    .or_default()
+                    .insert(connection_id, entry);
+                let best = crate::app::refresh_presence(inner, y7).await;
                 // Peer is reachable again — drop its reconnect backoff so
                 // a future disconnect retries immediately rather than
                 // inheriting a stale long cooldown.
@@ -115,11 +113,16 @@ async fn dispatch(
             }
             Ok(())
         }
-        NetEvent::ConnectionUpgraded { peer, kind } => {
-            // V2-A5: DCUtR succeeded — bump presence to the upgraded
-            // tier. Same code path as ConnectionEstablished; no queue
-            // drain because the relay path already delivered any
-            // in-flight messages.
+        NetEvent::ConnectionUpgraded {
+            peer,
+            connection_id,
+            kind,
+        } => {
+            // V2-A5: DCUtR succeeded. libp2p also fired a
+            // ConnectionEstablished for this same connection_id,
+            // classified Internet by its endpoint — relabel that entry
+            // `Direct` so best_kind promotes it. No queue drain: the
+            // relay path already delivered any in-flight messages.
             inner
                 .dcutr_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -131,11 +134,23 @@ async fn dispatch(
                 // this peer so the next relay reconnection (e.g. after
                 // suspend/resume) gets another full retry budget.
                 inner.upgrade_backoff.write().await.remove(&y7);
-                inner.presence.write().await.insert(y7, kind);
-                tracing::info!(%y7, ?kind, "presence upgraded via DCUtR");
+                {
+                    let mut conns = inner.connections.write().await;
+                    conns
+                        .entry(y7)
+                        .or_default()
+                        .entry(connection_id)
+                        .or_insert_with(|| crate::app::ConnEntry {
+                            kind,
+                            meta: crate::app::ConnectionMeta::default(),
+                        })
+                        .kind = kind;
+                }
+                let best = crate::app::refresh_presence(inner, y7).await;
+                tracing::info!(%y7, ?kind, ?best, "presence upgraded via DCUtR");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
-                    connection: kind,
+                    connection: best,
                 });
             }
             Ok(())
@@ -150,24 +165,25 @@ async fn dispatch(
             tracing::debug!(%peer, %error, "dcutr upgrade failed (stays on relay)");
             Ok(())
         }
-        NetEvent::ConnectionClosed { peer } => {
+        NetEvent::ConnectionClosed {
+            peer,
+            connection_id,
+        } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
-                // The Closed event doesn't carry the kind the connection
-                // had. We don't know which to remove from the active set;
-                // a best-effort heuristic is to clear the entire set and
-                // let any surviving connection re-announce via the
-                // libp2p ping cycle. The downgrade-to-Offline path is
-                // also driven explicitly by `check_live` on the
-                // background liveness ticker (Lane 3) — so a stale
-                // Established-but-actually-dead won't linger.
-                let best = {
-                    let mut kinds = inner.connection_kinds.write().await;
-                    kinds.remove(&y7);
-                    ConnectionKind::Offline
-                };
-                inner.connection_meta.write().await.remove(&y7);
-                inner.presence.write().await.insert(y7, best);
-                tracing::debug!(%y7, "connection closed → presence offline");
+                // Remove only the connection that closed, then recompute
+                // presence from any survivors. A relay circuit dropping
+                // must never blank a still-live LAN/direct path.
+                {
+                    let mut conns = inner.connections.write().await;
+                    if let Some(by_id) = conns.get_mut(&y7) {
+                        by_id.remove(&connection_id);
+                        if by_id.is_empty() {
+                            conns.remove(&y7);
+                        }
+                    }
+                }
+                let best = crate::app::refresh_presence(inner, y7).await;
+                tracing::debug!(%y7, ?best, "connection closed → presence recomputed");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,

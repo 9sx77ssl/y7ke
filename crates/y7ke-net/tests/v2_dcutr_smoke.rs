@@ -254,7 +254,7 @@ async fn wait_for_upgraded_to(
 ) -> ConnectionKind {
     loop {
         match rx.recv().await {
-            Ok(NetEvent::ConnectionUpgraded { peer, kind }) if peer == expected => {
+            Ok(NetEvent::ConnectionUpgraded { peer, kind, .. }) if peer == expected => {
                 return kind;
             }
             Ok(_) => continue,

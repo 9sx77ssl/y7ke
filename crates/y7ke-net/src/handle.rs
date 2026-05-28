@@ -27,7 +27,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
+use libp2p::{request_response::ResponseChannel, swarm::ConnectionId, Multiaddr, PeerId};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use y7ke_core::settings::DialMode;
@@ -451,19 +451,33 @@ pub enum NetEvent {
     /// `endpoint_addr` is the full remote multiaddr so the app layer
     /// can derive transport (TCP vs QUIC) + relay host for the
     /// Connectivity debug pane without re-querying the swarm.
+    /// `connection_id` keys the app's per-connection state so a peer
+    /// that holds several concurrent connections (e.g. relay + direct)
+    /// is tracked faithfully and a single close can't blank it.
     ConnectionEstablished {
         peer: PeerId,
+        connection_id: ConnectionId,
         kind: ConnectionKind,
         endpoint_addr: Multiaddr,
     },
-    /// Connection torn down. The application layer should mark the peer
-    /// offline / move pending sends back to the retry queue.
-    ConnectionClosed { peer: PeerId },
-    /// DCUtR (V2-A5) reported a successful direct-connection upgrade. The
-    /// underlying relayed circuit is still around briefly while libp2p
-    /// folds traffic over to the new direct path; the application layer
-    /// should bump presence to `kind = Direct` immediately.
-    ConnectionUpgraded { peer: PeerId, kind: ConnectionKind },
+    /// Connection torn down. Carries the `connection_id` so the app
+    /// removes only that connection and recomputes presence from any
+    /// survivors — a relay drop must not hide a live direct path.
+    ConnectionClosed {
+        peer: PeerId,
+        connection_id: ConnectionId,
+    },
+    /// DCUtR (V2-A5) reported a successful direct-connection upgrade.
+    /// `connection_id` is the freshly hole-punched direct connection
+    /// (libp2p also fired a `ConnectionEstablished` for it, classified
+    /// by endpoint as Internet); the app relabels that connection
+    /// `Direct` so `best_kind` promotes it. The underlying relayed
+    /// circuit lingers briefly while libp2p folds traffic over.
+    ConnectionUpgraded {
+        peer: PeerId,
+        connection_id: ConnectionId,
+        kind: ConnectionKind,
+    },
     /// DCUtR upgrade failed (one of: peer didn't respond in time,
     /// observed-address mismatch, both peers behind symmetric NAT, etc.).
     /// The existing Relayed connection stays in place. The

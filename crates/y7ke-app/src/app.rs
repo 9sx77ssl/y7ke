@@ -1,9 +1,10 @@
 //! Composition root: AppHandle owns storage + swarm + identity + event bus.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use libp2p::swarm::ConnectionId;
 use tokio::sync::broadcast;
 use y7ke_core::crypto::SigningKey;
 use y7ke_core::error::Result;
@@ -56,15 +57,19 @@ pub(crate) struct AppInner {
     pub me: SigningKey,
     pub my_pubkey: [u8; 32],
     pub my_y7_id: Y7Id,
-    /// Presence cache populated by event_loop. Read by list_contacts to
-    /// survive the boot race where PresenceChanged fires before UI listener.
-    /// Reflects the *best* kind currently active for each peer (max of
-    /// `connection_kinds`).
+    /// Presence cache: the *best* kind currently active per peer. A
+    /// derived view of `connections`, recomputed on every connection
+    /// event. Read by list_contacts to survive the boot race where
+    /// PresenceChanged fires before the UI listener attaches.
     pub presence: tokio::sync::RwLock<HashMap<Y7Id, ConnectionKind>>,
-    /// Active connection kinds per peer. When a peer holds two connections
-    /// (e.g. LAN + Relayed) we keep both; UI presence reflects the best
-    /// one. Updated alongside `presence` on every Established/Closed.
-    pub connection_kinds: tokio::sync::RwLock<HashMap<Y7Id, HashSet<ConnectionKind>>>,
+    /// Authoritative per-connection state: one entry per live libp2p
+    /// connection, keyed by `ConnectionId`. A peer holding several
+    /// connections (relay + direct after a DCUtR upgrade, or LAN +
+    /// relay) keeps one entry each, so a single `ConnectionClosed`
+    /// removes only that connection and presence is recomputed from the
+    /// survivors — a relay drop can never hide a live direct path.
+    /// `presence` and `connection_meta` are derived caches of this map.
+    pub connections: tokio::sync::RwLock<HashMap<Y7Id, HashMap<ConnectionId, ConnEntry>>>,
     pub rate_limiter: RateLimiter,
     /// Last-known ping state per bootstrap multiaddr (keyed by the full
     /// multiaddr string). Empty at boot — populated by `ping_all_bootstraps`.
@@ -122,6 +127,16 @@ pub struct ConnectionMeta {
     pub via_host: Option<String>,
     /// Underlying transport (TCP or QUIC) extracted from the multiaddr.
     pub transport: Option<y7ke_core::Transport>,
+}
+
+/// One live libp2p connection's facts, stored in `AppInner::connections`
+/// keyed by `ConnectionId`. `kind` is set from the endpoint on
+/// `ConnectionEstablished` and relabelled `Direct` on a DCUtR upgrade;
+/// `meta` carries the transport/relay-host for the Connectivity pane.
+#[derive(Debug, Clone)]
+pub struct ConnEntry {
+    pub kind: ConnectionKind,
+    pub meta: ConnectionMeta,
 }
 
 /// Extract the host segment (e.g. `bootstrap1.y7v.lol`) from a relayed
@@ -212,7 +227,7 @@ impl AppHandle {
             my_pubkey,
             my_y7_id,
             presence: tokio::sync::RwLock::new(HashMap::new()),
-            connection_kinds: tokio::sync::RwLock::new(HashMap::new()),
+            connections: tokio::sync::RwLock::new(HashMap::new()),
             rate_limiter: RateLimiter::default_limits(),
             bootstrap_pings: tokio::sync::RwLock::new(HashMap::new()),
             nat_status: tokio::sync::RwLock::new(NatStatusState::default()),
@@ -284,12 +299,37 @@ pub(crate) fn connection_kind_precedence(k: ConnectionKind) -> u8 {
     }
 }
 
-/// Best kind in `set`, or Offline if the set is empty.
-pub(crate) fn best_kind(set: &HashSet<ConnectionKind>) -> ConnectionKind {
-    set.iter()
-        .copied()
-        .max_by_key(|k| connection_kind_precedence(*k))
-        .unwrap_or(ConnectionKind::Offline)
+/// Best (kind, meta) across a peer's live connections, or
+/// (Offline, default) if it has none. Presence shows the highest-ranked
+/// kind; the pane shows that winning connection's transport/relay-host.
+pub(crate) fn best_conn(
+    conns: &HashMap<ConnectionId, ConnEntry>,
+) -> (ConnectionKind, ConnectionMeta) {
+    conns
+        .values()
+        .max_by_key(|e| connection_kind_precedence(e.kind))
+        .map(|e| (e.kind, e.meta.clone()))
+        .unwrap_or((ConnectionKind::Offline, ConnectionMeta::default()))
+}
+
+/// Recompute the `presence` + `connection_meta` derived caches for `y7`
+/// from the authoritative `connections` map and return the new best
+/// kind. Single place the two caches are written, so they can't desync.
+pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKind {
+    let (best, meta) = {
+        let conns = inner.connections.read().await;
+        conns
+            .get(&y7)
+            .map(best_conn)
+            .unwrap_or((ConnectionKind::Offline, ConnectionMeta::default()))
+    };
+    inner.presence.write().await.insert(y7, best);
+    if matches!(best, ConnectionKind::Offline) {
+        inner.connection_meta.write().await.remove(&y7);
+    } else {
+        inner.connection_meta.write().await.insert(y7, meta);
+    }
+    best
 }
 
 const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -433,15 +473,14 @@ async fn run_presence_ticker(
                                 prev = ?current_presence,
                                 "presence ticker: socket gone → Offline"
                             );
-                            inner.connection_kinds.write().await.remove(&c.y7_id);
-                            inner
-                                .presence
-                                .write()
-                                .await
-                                .insert(c.y7_id, ConnectionKind::Offline);
+                            // is_connected == false ⇒ no surviving
+                            // connections, so drop the whole peer entry
+                            // and let refresh_presence settle to Offline.
+                            inner.connections.write().await.remove(&c.y7_id);
+                            let best = crate::app::refresh_presence(&inner, c.y7_id).await;
                             let _ = event_tx.send(AppEvent::PresenceChanged {
                                 y7_id: c.y7_id.to_uri(),
-                                connection: ConnectionKind::Offline,
+                                connection: best,
                             });
                         }
                         Err(e) => {
@@ -473,5 +512,57 @@ fn process_rss_kb() -> Option<u64> {
     #[cfg(not(target_os = "linux"))]
     {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: ConnectionKind) -> ConnEntry {
+        ConnEntry {
+            kind,
+            meta: ConnectionMeta::default(),
+        }
+    }
+
+    #[test]
+    fn best_conn_empty_is_offline() {
+        let conns: HashMap<ConnectionId, ConnEntry> = HashMap::new();
+        assert_eq!(best_conn(&conns).0, ConnectionKind::Offline);
+    }
+
+    #[test]
+    fn best_conn_prefers_direct_over_relayed() {
+        let mut conns = HashMap::new();
+        conns.insert(
+            ConnectionId::new_unchecked(1),
+            entry(ConnectionKind::Relayed),
+        );
+        conns.insert(
+            ConnectionId::new_unchecked(2),
+            entry(ConnectionKind::Direct),
+        );
+        assert_eq!(best_conn(&conns).0, ConnectionKind::Direct);
+    }
+
+    #[test]
+    fn relay_survives_when_better_path_closes() {
+        // The core regression: a peer holds two connections; closing the
+        // higher-ranked one must leave the survivor, not blank to Offline.
+        let mut conns = HashMap::new();
+        let relay = ConnectionId::new_unchecked(1);
+        let lan = ConnectionId::new_unchecked(2);
+        conns.insert(relay, entry(ConnectionKind::Relayed));
+        conns.insert(lan, entry(ConnectionKind::Lan));
+        assert_eq!(best_conn(&conns).0, ConnectionKind::Lan);
+
+        // LAN connection closes → relay still live, peer stays online.
+        conns.remove(&lan);
+        assert_eq!(best_conn(&conns).0, ConnectionKind::Relayed);
+
+        // Relay also closes → now genuinely Offline.
+        conns.remove(&relay);
+        assert_eq!(best_conn(&conns).0, ConnectionKind::Offline);
     }
 }
