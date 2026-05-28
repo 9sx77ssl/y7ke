@@ -1,6 +1,6 @@
 //! Composition root: AppHandle owns storage + swarm + identity + event bus.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -58,7 +58,13 @@ pub(crate) struct AppInner {
     pub my_y7_id: Y7Id,
     /// Presence cache populated by event_loop. Read by list_contacts to
     /// survive the boot race where PresenceChanged fires before UI listener.
+    /// Reflects the *best* kind currently active for each peer (max of
+    /// `connection_kinds`).
     pub presence: tokio::sync::RwLock<HashMap<Y7Id, ConnectionKind>>,
+    /// Active connection kinds per peer. When a peer holds two connections
+    /// (e.g. LAN + Relayed) we keep both; UI presence reflects the best
+    /// one. Updated alongside `presence` on every Established/Closed.
+    pub connection_kinds: tokio::sync::RwLock<HashMap<Y7Id, HashSet<ConnectionKind>>>,
     pub rate_limiter: RateLimiter,
     /// Last-known ping state per bootstrap multiaddr (keyed by the full
     /// multiaddr string). Empty at boot — populated by `ping_all_bootstraps`.
@@ -92,6 +98,7 @@ impl AppHandle {
             my_pubkey,
             my_y7_id,
             presence: tokio::sync::RwLock::new(HashMap::new()),
+            connection_kinds: tokio::sync::RwLock::new(HashMap::new()),
             rate_limiter: RateLimiter::default_limits(),
             bootstrap_pings: tokio::sync::RwLock::new(HashMap::new()),
         });
@@ -130,6 +137,28 @@ impl AppHandle {
     pub async fn shutdown(&self) -> Result<()> {
         self.inner.net.shutdown().await
     }
+}
+
+/// Order ConnectionKind values best-first. Used by event_loop to pick
+/// which kind to publish when a peer has multiple active connections
+/// (e.g. LAN + Relayed). Higher precedence wins.
+pub(crate) fn connection_kind_precedence(k: ConnectionKind) -> u8 {
+    match k {
+        ConnectionKind::Direct => 5,
+        ConnectionKind::Lan => 4,
+        ConnectionKind::Internet => 3,
+        ConnectionKind::Relayed => 2,
+        ConnectionKind::Connecting => 1,
+        ConnectionKind::Offline => 0,
+    }
+}
+
+/// Best kind in `set`, or Offline if the set is empty.
+pub(crate) fn best_kind(set: &HashSet<ConnectionKind>) -> ConnectionKind {
+    set.iter()
+        .copied()
+        .max_by_key(|k| connection_kind_precedence(*k))
+        .unwrap_or(ConnectionKind::Offline)
 }
 
 /// Linux-only best-effort RSS reading via /proc/self/status. Boot telemetry only.

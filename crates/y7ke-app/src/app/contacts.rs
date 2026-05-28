@@ -151,8 +151,14 @@ impl AppHandle {
         tracing::info!(%peer, "discovery: step 3 — Kad get_providers query");
         match self.inner.net.find_peer(peer).await {
             Ok(addrs) => {
-                let filtered = filter_addrs_by_mode(addrs, &modes);
-                tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter)");
+                let mut filtered = filter_addrs_by_mode(addrs, &modes);
+                // Prefer direct (non-circuit, non-LAN-only) first, then
+                // circuit (relay) fallbacks, with LAN-looking addrs
+                // last — Kad can return both the peer's public addr
+                // AND its 192.168.x.x interface, and the latter won't
+                // reach across NATs.
+                filtered.sort_by_key(|m| sort_addr_priority(m));
+                tracing::info!(%peer, count = filtered.len(), "discovery: step 3 Kad returned addrs (after mode filter + sort)");
                 for addr in filtered {
                     if self.inner.net.dial_address(addr).await.is_ok() {
                         return;
@@ -374,6 +380,21 @@ impl AppHandle {
             .into_iter()
             .find(|r| r.id == id)
             .ok_or(AppError::NotFound)
+    }
+}
+
+/// Sort key for dial ordering. Lower value = try first.
+/// Direct public addrs first, circuit relays second, LAN-only addrs
+/// last (those usually don't reach across NATs).
+fn sort_addr_priority(addr: &libp2p::Multiaddr) -> u8 {
+    let is_circuit = addr
+        .iter()
+        .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+    let is_lan = y7ke_net::multiaddr_is_lan(addr);
+    match (is_circuit, is_lan) {
+        (false, false) => 0, // direct internet
+        (true, _) => 1,      // relay fallback
+        (false, true) => 2,  // LAN-only (rarely useful for cross-NAT)
     }
 }
 

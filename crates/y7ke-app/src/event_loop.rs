@@ -76,10 +76,21 @@ async fn dispatch(
         }
         NetEvent::ConnectionEstablished { peer, kind } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
-                inner.presence.write().await.insert(y7, kind);
+                // Track every active kind for this peer; pick the best
+                // for the user-visible presence. Without this a Relayed
+                // ConnectionEstablished arriving after a LAN one would
+                // overwrite the LAN entry and the UI would flicker
+                // "Relayed" even though the LAN socket is still alive.
+                let best = {
+                    let mut kinds = inner.connection_kinds.write().await;
+                    let set = kinds.entry(y7).or_default();
+                    set.insert(kind);
+                    crate::app::best_kind(set)
+                };
+                inner.presence.write().await.insert(y7, best);
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
-                    connection: kind,
+                    connection: best,
                 });
                 drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
@@ -90,15 +101,24 @@ async fn dispatch(
         }
         NetEvent::ConnectionClosed { peer } => {
             if let Some(y7) = y7ke_net::y7_id_from_peer_id(&peer) {
-                inner
-                    .presence
-                    .write()
-                    .await
-                    .insert(y7, ConnectionKind::Offline);
+                // The Closed event doesn't carry the kind the connection
+                // had. We don't know which to remove from the active set;
+                // a best-effort heuristic is to clear the entire set and
+                // let any surviving connection re-announce via the
+                // libp2p ping cycle. The downgrade-to-Offline path is
+                // also driven explicitly by `check_live` on the
+                // background liveness ticker (Lane 3) — so a stale
+                // Established-but-actually-dead won't linger.
+                let best = {
+                    let mut kinds = inner.connection_kinds.write().await;
+                    kinds.remove(&y7);
+                    ConnectionKind::Offline
+                };
+                inner.presence.write().await.insert(y7, best);
                 tracing::debug!(%y7, "connection closed → presence offline");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
-                    connection: ConnectionKind::Offline,
+                    connection: best,
                 });
             } else {
                 tracing::debug!(%peer, "connection closed for non-Ed25519 peer");
