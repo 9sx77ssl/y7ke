@@ -154,6 +154,13 @@
     return parts[idx + 1] ?? b.multiaddr;
   }
 
+  // Match the Settings pill labels: Internet is shown as "Y7net".
+  function dialModeLabel(m: string | undefined): string {
+    if (m === "LanOnly") return "lan only";
+    if (m === "Internet") return "Y7net";
+    return "—";
+  }
+
   function reachLabel(b: BootstrapEntry): string {
     if (b.last_ping_failed) return "unreachable";
     if (b.last_ping_ms !== null) return "reachable";
@@ -178,9 +185,7 @@
       <div class="metrics">
         <div class="metric">
           <span class="label">dial mode</span>
-          <span class="value">
-            {settingsStore.settings?.dial_mode ?? "—"}
-          </span>
+          <span class="value">{dialModeLabel(settingsStore.settings?.dial_mode)}</span>
         </div>
         <div class="metric">
           <span class="label">nat status</span>

@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.100] — 2026-05-29
+
+- fix(ui): show "Y7net" (not "internet") for dial mode in Connectivity pane
+
 ## [0.1.99] — 2026-05-29
 
 - chore: regenerate DialMode.ts (drop stale serde-alias doc comment)
