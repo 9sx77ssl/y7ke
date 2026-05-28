@@ -894,10 +894,13 @@ revision doesn't strand pending commits.
 
 ## Live manual smoke results
 
-*(To be filled in after Phase 3 step 13 execution. Will contain:
-home WiFi machine y7 ID, mobile 4G machine y7 ID, log captures
-from both, observed connection kind progression, DCUtR attempt
-counts, any rejected scenarios with the NAT-class diagnosis.)*
+Runbook: [`docs/LIVE_SMOKE.md`](LIVE_SMOKE.md) — step-by-step procedure,
+log signatures, and pass criteria for the PC ↔ mobile-4G acceptance gate.
+
+*(Results to be filled in after execution: home WiFi machine y7 ID,
+mobile 4G machine y7 ID, log captures from both, observed connection
+kind progression, DCUtR attempt counts, any rejected scenarios with the
+NAT-class diagnosis.)*
 
 ---
 

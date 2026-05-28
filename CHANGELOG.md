@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.81] — 2026-05-28
+
+- docs: live cross-network smoke runbook (Phase 3.5)
+
 ## [0.1.80] — 2026-05-28
 
 - test(net): QUIC IP-change migration experiment (Phase 3.4)
