@@ -1,6 +1,10 @@
 //! V2-A4 integration test: a relay-bootstrap plus two clients
 //! (Alice + Bob). Both clients reserve a slot on the bootstrap and
 //! Alice dials Bob through it using the `/p2p-circuit` multiaddr.
+//! Also covers Phase 3.1 (sync-over-relay): after the handshake the
+//! `/y7ke/sync/1.0.0` request-response protocol is driven across the
+//! same circuit, proving the sync codec survives the relay transport
+//! (the fallback every offline-reconcile depends on).
 //!
 //! The bootstrap node here is a stripped-down relay server — it
 //! carries `relay::Behaviour` (server side) alongside identify, ping,
@@ -24,6 +28,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use y7ke_core::ConnectionKind;
+use y7ke_net::protocol::{ConversationDigest, SyncReq, SyncResp};
 use y7ke_net::{
     build_swarm, libp2p_keypair_from_y7_secret, spawn_swarm_with_bootstraps, HandshakeReq,
     HandshakeResp, NetCommand, NetEvent, NetHandle,
@@ -163,8 +168,81 @@ async fn run_relay_round_trip() {
         .expect("bob responder panicked");
     assert_eq!(observed.greeting.as_deref(), Some("hello via relay"));
 
+    // Phase 3.1 — sync over the relay. Bob answers one `SyncReq::Header`
+    // with `HeaderAck`; Alice drives the round trip over the same
+    // `/p2p-circuit` connection. Proves the larger sync frames traverse
+    // the relay just like the handshake did.
+    let bob_sync = spawn_sync_responder(&mut bob);
+    let digest = ConversationDigest {
+        conversation_id: [0x11; 16],
+        highest_outbound_msg_id: None,
+        highest_inbound_msg_id: None,
+    };
+    let sync_resp = timeout(
+        Duration::from_secs(15),
+        alice.send_sync(
+            bob_peer,
+            SyncReq::Header {
+                conversations: vec![digest],
+            },
+        ),
+    )
+    .await
+    .expect("alice sync timed out")
+    .expect("alice sync errored");
+    match sync_resp {
+        SyncResp::HeaderAck { ours } => {
+            assert_eq!(ours.len(), 1, "bob echoed one digest back over the relay");
+        }
+        other => panic!("expected HeaderAck over relay, got {other:?}"),
+    }
+    let observed_sync = timeout(Duration::from_secs(5), bob_sync)
+        .await
+        .expect("bob sync responder did not return")
+        .expect("bob sync responder panicked");
+    assert!(
+        matches!(observed_sync, SyncReq::Header { .. }),
+        "bob received the Header sync request over the relay"
+    );
+
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
+}
+
+/// Bob-side: answer one inbound `SyncReq` with a `HeaderAck` echoing a
+/// single digest, then return the request it saw. Mirrors
+/// `spawn_handshake_responder`.
+fn spawn_sync_responder(bob: &mut NetHandle) -> JoinHandle<SyncReq> {
+    let cmd_sender = bob.clone_command_sender();
+    let mut rx = bob.try_clone_event_rx();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(NetEvent::SyncReceived {
+                    request, channel, ..
+                }) => {
+                    let ch = channel.take().expect("sync response channel already taken");
+                    cmd_sender
+                        .send(NetCommand::RespondSync {
+                            channel: ch,
+                            response: SyncResp::HeaderAck {
+                                ours: vec![ConversationDigest {
+                                    conversation_id: [0x22; 16],
+                                    highest_outbound_msg_id: None,
+                                    highest_inbound_msg_id: None,
+                                }],
+                            },
+                        })
+                        .await
+                        .expect("forward respond sync command");
+                    return request;
+                }
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => panic!("event channel closed"),
+            }
+        }
+    })
 }
 
 // --------------------------------------------------------------------------

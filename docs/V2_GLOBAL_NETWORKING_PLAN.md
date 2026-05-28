@@ -760,7 +760,7 @@ beyond existing transitions.
 | `v2_dcutr_smoke.rs` (DCUtR loopback) | ✓ | extend to assert ≤3 s after push fix |
 | `quic_listen_smoke.rs` (QUIC listens at boot) | ✓ | unchanged |
 | `v2_sync_reconcile.rs` (sync via mDNS) | ✓ | unchanged |
-| `v2_sync_over_relay.rs` (sync via /p2p-circuit) | — | **new — Phase 3 step 9** |
+| sync via /p2p-circuit | ✓ folded into `four_node_relay.rs` (Phase 3.1) | extend with offline-queue drain |
 | `autonat_smoke.rs` (AutoNAT verdict) | — | **new — Phase 2 step 2** |
 | `v2_nat_sim.rs` (netns + iptables NAT classes) | — | **new — Phase 3 step 10** |
 | `v2_transport_migration.rs` (IP change → QUIC migration) | — | **new — Phase 3 step 12** |
