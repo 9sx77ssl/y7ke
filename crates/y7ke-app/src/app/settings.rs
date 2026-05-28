@@ -66,6 +66,24 @@ impl AppHandle {
                     });
                 }
             }
+            // V2-A4: wake the presence ticker so contacts re-resolve
+            // within ~1 s instead of waiting up to 30 s. Also clears
+            // the upgrade-from-relay backoff so any persisted Relayed
+            // connections get an immediate fresh upgrade attempt under
+            // the new mode.
+            self.inner.upgrade_backoff.write().await.clear();
+            self.inner.wake_notify.notify_one();
+
+            // Stale-relay sweep: entering LanOnly invalidates every
+            // cached circuit multiaddr. Strip them from peer_state so a
+            // user toggling LanOnly → Internet later doesn't burn a
+            // dial-cycle on dead relay addresses cached during the
+            // previous Internet session.
+            if matches!(settings.dial_mode, y7ke_core::DialMode::LanOnly) {
+                if let Err(e) = sweep_stale_relay_addrs(&self.inner.db).await {
+                    tracing::warn!(error = %e, "stale-relay sweep failed");
+                }
+            }
         }
 
         let _ = self.event_tx.send(AppEvent::SettingsChanged);
@@ -144,6 +162,38 @@ impl AppHandle {
             None => Some(DEFAULT_RELAY_BOOTSTRAP.to_string()),
         }
     }
+}
+
+/// Walk every `peer_state.last_addrs_json` row, drop any cached
+/// multiaddr that contains a `/p2p-circuit` segment, and re-upsert
+/// the row with whatever non-circuit addrs remain (or `None` if that
+/// empties the list). Best-effort — a single failed row is logged at
+/// debug and skipped. Called when the user moves to `LanOnly` so a
+/// later switch back to `Internet` doesn't burn a dial-cycle on
+/// stale relay paths.
+async fn sweep_stale_relay_addrs(db: &y7ke_storage::Db) -> Result<()> {
+    let peers = db.peer_state().list_all().await?;
+    for ps in peers {
+        let Some(json) = ps.last_addrs_json.as_deref() else {
+            continue;
+        };
+        let Ok(addrs) = serde_json::from_str::<Vec<String>>(json) else {
+            continue;
+        };
+        let kept: Vec<String> = addrs
+            .into_iter()
+            .filter(|s| !s.contains("/p2p-circuit"))
+            .collect();
+        let new = if kept.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&kept).ok()
+        };
+        if let Err(e) = db.peer_state().upsert_seen(&ps.peer_y7_id, new).await {
+            tracing::debug!(y7_id = %ps.peer_y7_id, error = %e, "stale-relay sweep upsert failed");
+        }
+    }
+    Ok(())
 }
 
 fn make_entry(
