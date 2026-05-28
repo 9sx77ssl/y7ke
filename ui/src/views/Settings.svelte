@@ -26,6 +26,7 @@
   // Local editable rows; mirrors `settingsStore.bootstraps` plus optional
   // empty/in-progress rows the user has added with the "+ add" button.
   interface Row {
+    id: string;
     multiaddr: string;
     is_default: boolean;
     last_ping_ms: number | null;
@@ -35,6 +36,14 @@
 
   // Track loaded state so we don't clobber edits on every refresh.
   let hydrated = $state(false);
+  // Set when the user edits anything; lets live/external settings changes
+  // re-hydrate the form when the user has NO pending edits, without
+  // clobbering edits in progress. Cleared on (re)hydrate + successful save.
+  let userTouched = $state(false);
+
+  function fromStore(b: BootstrapEntry): Row {
+    return { ...b, id: crypto.randomUUID() };
+  }
 
   $effect(() => {
     if (!settingsStore.loadedOnce && !settingsStore.loading) {
@@ -50,10 +59,22 @@
       settingsStore.settings !== null
     ) {
       dialMode = settingsStore.settings.dial_mode;
-      rows = settingsStore.bootstraps.map((b) => ({ ...b }));
+      rows = settingsStore.bootstraps.map(fromStore);
       hydrated = true;
+      userTouched = false;
       logger.debug("hydrated from store");
     }
+  });
+
+  // Re-hydrate on an EXTERNAL/live-applied change (settings_changed event →
+  // store refresh) — but only when the user has no pending edits, so we
+  // adopt the new effective settings instead of leaving the form frozen on
+  // a stale copy (which also made `dirty` mis-fire). In-progress edits win.
+  $effect(() => {
+    const s = settingsStore.settings;
+    if (!hydrated || s === null || userTouched) return;
+    dialMode = s.dial_mode;
+    rows = settingsStore.bootstraps.map(fromStore);
   });
 
   // When ping_all returns, merge the new ping values into existing rows that
@@ -120,14 +141,17 @@
 
   // ── handlers ──────────────────────────────────────────────────────────────
   function selectMode(next: DialMode): void {
+    userTouched = true;
     dialMode = next;
     logger.debug("mode ->", next);
   }
 
   function addRow(): void {
+    userTouched = true;
     rows = [
       ...rows,
       {
+        id: crypto.randomUUID(),
         multiaddr: "",
         is_default: false,
         last_ping_ms: null,
@@ -140,11 +164,13 @@
   function removeRow(index: number): void {
     const target = rows[index];
     if (target === undefined || target.is_default) return;
+    userTouched = true;
     rows = rows.filter((_, i) => i !== index);
     logger.debug("removed bootstrap row", String(index));
   }
 
   function updateRowAddr(index: number, value: string): void {
+    userTouched = true;
     rows = rows.map((r, i) => (i === index ? { ...r, multiaddr: value } : r));
   }
 
@@ -160,6 +186,9 @@
     logger.info("saving", `dial_mode=${dialMode}`, `extras=${extras.length}`);
     try {
       await saveSettings(dialMode, extras);
+      // Saved copy is now the store copy — let the re-hydrate effect adopt
+      // the canonical post-save state (e.g. trimmed/deduped extras).
+      userTouched = false;
       toast.success("settings saved");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -261,7 +290,7 @@
         <p class="empty">no bootstrap entries.</p>
       {:else}
         <ul class="rows">
-          {#each rows as r, i (i)}
+          {#each rows as r, i (r.id)}
             {@const hasPing =
               r.last_ping_failed || r.last_ping_ms !== null}
             <li class="row">

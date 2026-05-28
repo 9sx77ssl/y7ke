@@ -37,7 +37,13 @@
   });
   let lastRefreshAt = $state<number>(0);
 
+  // Monotonic generation: during a reconnect storm the poller + the event
+  // reactor can launch overlapping refreshes; only the newest one is allowed
+  // to commit, so a slow older call can't clobber fresh state with stale data.
+  let gen = 0;
+
   async function refresh(): Promise<void> {
+    const my = ++gen;
     try {
       const [c, b, n, d] = await Promise.all([
         listActiveConnections(),
@@ -45,6 +51,7 @@
         getNatStatus(),
         getDcutrStats(),
       ]);
+      if (my !== gen) return; // superseded by a newer refresh
       connections = c;
       bootstraps = b;
       nat = n;
@@ -64,12 +71,17 @@
     return () => clearInterval(id);
   });
 
-  // React to AppEvents that demand an immediate refresh.
+  // React to AppEvents that demand a refresh, debounced so a presence/NAT
+  // storm coalesces into a single fetch (~150ms quiet) instead of one
+  // 4-RPC burst per event.
   $effect(() => {
     // Touching these dependencies forces re-run when the events fire.
     const _ = eventState.presenceRev + eventState.natRev;
     void _;
-    void refresh();
+    const id = setTimeout(() => {
+      void refresh();
+    }, 150);
+    return () => clearTimeout(id);
   });
 
   function dcutrRatePct(): number | null {
