@@ -10,7 +10,11 @@
     sendText,
   } from "../lib/stores/chat.svelte";
   import { findContact } from "../lib/stores/contacts.svelte";
-  import { getPresence, presenceLabel } from "../lib/stores/presence.svelte";
+  import {
+    getPresence,
+    getTransport,
+    presenceLabel,
+  } from "../lib/stores/presence.svelte";
   import { truncateY7Id } from "../lib/format";
   import { log } from "../lib/log";
   import Button from "../lib/components/Button.svelte";
@@ -56,6 +60,7 @@
 
   const contact = $derived(findContact(peerY7Id));
   const presence = $derived(getPresence(peerY7Id));
+  const transport = $derived(getTransport(peerY7Id));
   const displayName = $derived(
     contact?.nickname ?? truncateY7Id(peerY7Id, 10, 8),
   );
@@ -102,7 +107,7 @@
       <span class="name" title={contact?.nickname ?? peerY7Id}>
         {displayName}
       </span>
-      <ConnectionLabel kind={presence} />
+      <ConnectionLabel kind={presence} {transport} />
     </div>
     {#if hasNickname}
       <div class="head-right">

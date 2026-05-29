@@ -319,13 +319,16 @@ pub(crate) fn best_conn(
 }
 
 /// Recompute the `presence` + `connection_meta` derived caches for `y7`
-/// from the authoritative `connections` map and return the new best
-/// kind. Single place the two caches are written, so they can't desync.
-/// Offline *removes* the entries rather than storing an `Offline` row —
-/// otherwise a `ConnectionClosed` arriving after a contact was deleted
-/// would resurrect a ghost presence entry (absence already reads as
-/// Offline via `unwrap_or` at the call sites).
-pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKind {
+/// from the authoritative `connections` map and return the new best kind
+/// plus its transport. Single place the two caches are written, so they
+/// can't desync. Offline *removes* the entries rather than storing an
+/// `Offline` row — otherwise a `ConnectionClosed` arriving after a contact
+/// was deleted would resurrect a ghost presence entry (absence already
+/// reads as Offline via `unwrap_or` at the call sites).
+pub(crate) async fn refresh_presence(
+    inner: &AppInner,
+    y7: Y7Id,
+) -> (ConnectionKind, Option<y7ke_core::Transport>) {
     let (best, meta) = {
         let conns = inner.connections.read().await;
         conns
@@ -333,6 +336,7 @@ pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKi
             .map(best_conn)
             .unwrap_or((ConnectionKind::Offline, ConnectionMeta::default()))
     };
+    let transport = meta.transport;
     if matches!(best, ConnectionKind::Offline) {
         inner.presence.write().await.remove(&y7);
         inner.connection_meta.write().await.remove(&y7);
@@ -340,7 +344,7 @@ pub(crate) async fn refresh_presence(inner: &AppInner, y7: Y7Id) -> ConnectionKi
         inner.presence.write().await.insert(y7, best);
         inner.connection_meta.write().await.insert(y7, meta);
     }
-    best
+    (best, transport)
 }
 
 const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -516,7 +520,8 @@ async fn run_presence_ticker(
                                     }
                                 }
                             }
-                            let best = crate::app::refresh_presence(&inner, c.y7_id).await;
+                            let (best, transport) =
+                                crate::app::refresh_presence(&inner, c.y7_id).await;
                             if matches!(best, ConnectionKind::Offline) {
                                 tracing::info!(
                                     y7_id = %c.y7_id,
@@ -527,6 +532,7 @@ async fn run_presence_ticker(
                             let _ = event_tx.send(AppEvent::PresenceChanged {
                                 y7_id: c.y7_id.to_uri(),
                                 connection: best,
+                                transport,
                             });
                         }
                         Err(e) => {

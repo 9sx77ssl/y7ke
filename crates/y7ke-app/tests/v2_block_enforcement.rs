@@ -64,7 +64,10 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
         .find(|r| r.peer_y7_id == bob_id.to_uri())
         .ok_or("no pending request on alice")?;
     alice.reject_request(req.id).await?;
-    assert_eq!(contact_status(&alice, &bob_id).await?, Some(ContactStatus::Blocked));
+    assert_eq!(
+        contact_status(&alice, &bob_id).await?,
+        Some(ContactStatus::Blocked)
+    );
 
     // Bob still holds the session, so send_message succeeds locally and the
     // envelope reaches Alice's handle_msg. It must be dropped silently.
@@ -75,9 +78,9 @@ async fn scenario() -> Result<(), Box<dyn std::error::Error>> {
     let leaked = timeout(Duration::from_secs(8), async {
         loop {
             match alice_events.recv().await {
-                Ok(AppEvent::MessageReceived { sender_y7_id, text, .. })
-                    if sender_y7_id == bob_id.to_uri() && text == "blocked payload" =>
-                {
+                Ok(AppEvent::MessageReceived {
+                    sender_y7_id, text, ..
+                }) if sender_y7_id == bob_id.to_uri() && text == "blocked payload" => {
                     return true;
                 }
                 Ok(_) => continue,
@@ -145,7 +148,12 @@ where
 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        match timeout(deadline.duration_since(tokio::time::Instant::now()), rx.recv()).await {
+        match timeout(
+            deadline.duration_since(tokio::time::Instant::now()),
+            rx.recv(),
+        )
+        .await
+        {
             Err(_) => return Err("timed out waiting for matching AppEvent"),
             Ok(Err(_)) => return Err("event channel closed"),
             Ok(Ok(ev)) if matcher(&ev) => return Ok(ev),

@@ -316,6 +316,7 @@ impl AppHandle {
     pub async fn list_contacts(&self) -> Result<Vec<ContactView>> {
         let rows = self.inner.db.contacts().list().await?;
         let presence_map = self.inner.presence.read().await;
+        let meta_map = self.inner.connection_meta.read().await;
         Ok(rows
             .into_iter()
             .map(|c| ContactView {
@@ -327,6 +328,7 @@ impl AppHandle {
                     .get(&c.y7_id)
                     .copied()
                     .unwrap_or(y7ke_core::ConnectionKind::Offline),
+                transport: meta_map.get(&c.y7_id).and_then(|m| m.transport),
             })
             .collect())
     }

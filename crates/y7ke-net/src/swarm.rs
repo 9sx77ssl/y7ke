@@ -45,9 +45,10 @@ use crate::protocol::{HandshakeResp, MsgResp, SyncResp};
 ///
 /// The application layer (`y7ke-app::Config::load`) overrides this from
 /// `~/.config/y7ke/bootstrap.toml` or the `Y7KE_BOOTSTRAP` env var.
-pub const DEFAULT_BOOTSTRAPS: &[&str] = &[
-    "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo",
-];
+// Transport-agnostic shorthand: the app layer expands it (via
+// `y7ke_core::expand_bootstrap`) into BOTH a TCP and a QUIC multiaddr.
+pub const DEFAULT_BOOTSTRAPS: &[&str] =
+    &["/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo"];
 
 /// Default TCP listen address (random port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
@@ -156,27 +157,35 @@ pub fn spawn_swarm_with_bootstraps(
     // record the peer→addr map so a later mode switch can pick them up,
     // but only dial + bootstrap when not in LanOnly mode.
     let lan_only = matches!(initial_mode, DialMode::LanOnly);
-    let mut bootstrap_peers: HashMap<PeerId, Multiaddr> = HashMap::new();
+    // Group bootstrap addrs by PeerId: one peer can have several transports
+    // (TCP + QUIC from the same descriptor), all dialed together so libp2p
+    // races them (QUIC wins on UDP-open networks → direct hole-punch path).
+    let mut bootstrap_peers: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
     for addr in &bootstraps {
         match peer_id_from_multiaddr(addr) {
             Some(peer) => {
-                bootstrap_peers.insert(peer, addr.clone());
-                if lan_only {
-                    continue;
-                }
-                swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
-                let class = addr_class(addr);
-                if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%addr, class, "bootstrap dial failed: {e}");
-                } else {
-                    debug!(%peer, %addr, class, "dialing bootstrap node");
+                let entry = bootstrap_peers.entry(peer).or_default();
+                if !entry.contains(addr) {
+                    entry.push(addr.clone());
                 }
             }
-            None => {
-                warn!(
-                    %addr,
-                    "bootstrap multiaddr lacks /p2p/<peer-id>; ignoring"
-                );
+            None => warn!(%addr, "bootstrap multiaddr lacks /p2p/<peer-id>; ignoring"),
+        }
+    }
+    if !lan_only {
+        for (peer, addrs) in &bootstrap_peers {
+            for addr in addrs {
+                swarm.behaviour_mut().kad.add_address(peer, addr.clone());
+            }
+            // Single DialOpts carrying every transport for this peer →
+            // libp2p races them and keeps the first to connect.
+            let opts = DialOpts::peer_id(*peer)
+                .addresses(addrs.clone())
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match swarm.dial(opts) {
+                Ok(()) => debug!(%peer, count = addrs.len(), "dialing bootstrap (tcp+quic race)"),
+                Err(e) => warn!(%peer, "bootstrap dial failed: {e}"),
             }
         }
     }
@@ -211,7 +220,7 @@ async fn run_swarm(
     mut swarm: Swarm<Y7Behaviour>,
     mut cmd_rx: mpsc::Receiver<NetCommand>,
     event_tx: broadcast::Sender<NetEvent>,
-    bootstrap_peers: HashMap<PeerId, Multiaddr>,
+    bootstrap_peers: HashMap<PeerId, Vec<Multiaddr>>,
     initial_mode: DialMode,
 ) {
     let mut state = TaskState {
@@ -266,26 +275,26 @@ async fn run_swarm(
 const BOOTSTRAP_RECONNECT_INTERVAL: Duration = Duration::from_secs(15);
 
 fn reconnect_lost_bootstraps(swarm: &mut Swarm<Y7Behaviour>, state: &TaskState) {
-    for (peer, addr) in &state.bootstrap_peers {
+    for (peer, addrs) in &state.bootstrap_peers {
         if swarm.is_connected(peer) {
             continue;
         }
-        let class = addr_class(addr);
-        // `DisconnectedAndNotDialing` so a slow bootstrap dial that
-        // hasn't resolved yet isn't re-issued on the next 15-s tick —
-        // we wait for the in-flight attempt to finish (succeed or fail)
-        // before trying again. Prevents a redial pile-up during an
-        // outage where every dial is timing out.
+        // One DialOpts carrying every transport for this peer, gated by
+        // `DisconnectedAndNotDialing` so a slow dial that hasn't resolved
+        // isn't re-issued on the next 15-s tick (no redial pile-up during
+        // an outage). DisconnectedAndNotDialing also collapses the
+        // multi-addr race into a single in-flight attempt per peer, so
+        // adding QUIC doesn't multiply dial pressure on the VPS.
         let opts = DialOpts::peer_id(*peer)
-            .addresses(vec![addr.clone()])
+            .addresses(addrs.clone())
             .condition(PeerCondition::DisconnectedAndNotDialing)
             .build();
         match swarm.dial(opts) {
-            Ok(()) => debug!(%peer, %addr, class, "redialing lost bootstrap"),
+            Ok(()) => debug!(%peer, count = addrs.len(), "redialing lost bootstrap (tcp+quic)"),
             Err(DialError::DialPeerConditionFalse(_)) => {
-                debug!(%peer, class, "bootstrap redial skipped — dial already in progress")
+                debug!(%peer, "bootstrap redial skipped — dial already in progress")
             }
-            Err(e) => debug!(%peer, %addr, class, error = %e, "bootstrap redial failed"),
+            Err(e) => debug!(%peer, error = %e, "bootstrap redial failed"),
         }
     }
 }
@@ -320,7 +329,7 @@ struct TaskState {
     /// Bootstrap peers we configured at startup → their full multiaddr.
     /// Used by `ConnectionEstablished` to know which connections deserve
     /// a `listen_on(<addr>/p2p-circuit)` reservation request.
-    bootstrap_peers: HashMap<PeerId, Multiaddr>,
+    bootstrap_peers: HashMap<PeerId, Vec<Multiaddr>>,
 
     /// Bootstrap peers we have already issued a reservation `listen_on`
     /// for in this task's lifetime — guards against re-issuing every
@@ -535,10 +544,15 @@ fn handle_command(
         }
 
         NetCommand::UpdateBootstraps { addresses } => {
-            let mut next: HashMap<PeerId, Multiaddr> = HashMap::new();
+            // Incoming addresses are already expanded (config.rs) — group
+            // by PeerId so a bootstrap's TCP + QUIC addrs share one entry.
+            let mut next: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
             for addr in &addresses {
                 if let Some(peer) = peer_id_from_multiaddr(addr) {
-                    next.insert(peer, addr.clone());
+                    let e = next.entry(peer).or_default();
+                    if !e.contains(addr) {
+                        e.push(addr.clone());
+                    }
                 } else {
                     warn!(%addr, "update_bootstraps: addr missing /p2p/<peer-id>; ignoring");
                 }
@@ -546,19 +560,21 @@ fn handle_command(
             // Seed Kad + dial anything new. While LanOnly we only update
             // the recorded map and skip dialing.
             let lan_only = matches!(state.dial_mode, DialMode::LanOnly);
-            for (peer, addr) in &next {
-                if state.bootstrap_peers.contains_key(peer) {
+            for (peer, addrs) in &next {
+                if state.bootstrap_peers.contains_key(peer) || lan_only {
                     continue;
                 }
-                if lan_only {
-                    continue;
+                for addr in addrs {
+                    swarm.behaviour_mut().kad.add_address(peer, addr.clone());
                 }
-                swarm.behaviour_mut().kad.add_address(peer, addr.clone());
-                let class = addr_class(addr);
-                if let Err(e) = swarm.dial(addr.clone()) {
-                    warn!(%addr, class, "update_bootstraps: dial failed: {e}");
+                let opts = DialOpts::peer_id(*peer)
+                    .addresses(addrs.clone())
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .build();
+                if let Err(e) = swarm.dial(opts) {
+                    warn!(%peer, "update_bootstraps: dial failed: {e}");
                 } else {
-                    debug!(%peer, %addr, class, "update_bootstraps: dialing new bootstrap");
+                    debug!(%peer, count = addrs.len(), "update_bootstraps: dialing new bootstrap");
                 }
             }
             state.bootstrap_peers = next;
@@ -614,8 +630,10 @@ fn handle_command(
                     // Re-seed Kad + immediately probe bootstraps so the
                     // user doesn't wait BOOTSTRAP_RECONNECT_INTERVAL for
                     // the first dial.
-                    for (peer, addr) in state.bootstrap_peers.clone() {
-                        swarm.behaviour_mut().kad.add_address(&peer, addr.clone());
+                    for (peer, addrs) in state.bootstrap_peers.clone() {
+                        for addr in addrs {
+                            swarm.behaviour_mut().kad.add_address(&peer, addr);
+                        }
                     }
                     reconnect_lost_bootstraps(swarm, state);
                     if !state.bootstrap_peers.is_empty() {
@@ -680,21 +698,32 @@ async fn handle_swarm_event(
             // bootstrap so other clients can dial us through it.
             // Skipped while LanOnly — a circuit listen has no point if
             // we're not soliciting internet traffic.
-            if !matches!(state.dial_mode, DialMode::LanOnly) {
-                if let Some(bootstrap_addr) = state.bootstrap_peers.get(&peer_id).cloned() {
-                    if state.relay_reserved.insert(peer_id) {
-                        let circuit_addr =
-                            bootstrap_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
-                        match swarm.listen_on(circuit_addr.clone()) {
-                            Ok(lid) => {
-                                state.circuit_listeners.insert(peer_id, lid);
-                                info!(%peer_id, %circuit_addr, ?lid, "relay: requesting reservation");
-                            }
-                            Err(e) => {
-                                state.relay_reserved.remove(&peer_id);
-                                warn!(%peer_id, error = %e, "relay: listen_on circuit failed");
-                            }
-                        }
+            if !matches!(state.dial_mode, DialMode::LanOnly)
+                && !endpoint.is_relayed()
+                && state.bootstrap_peers.contains_key(&peer_id)
+                && state.relay_reserved.insert(peer_id)
+            {
+                // Reserve a circuit over WHATEVER transport actually
+                // connected (QUIC if QUIC won the race) by deriving the
+                // circuit addr from the live endpoint, not a stored addr.
+                // Strip any trailing /p2p, re-add the relay's /p2p, then
+                // /p2p-circuit → `<transport>/p2p/<relay>/p2p-circuit`.
+                use libp2p::multiaddr::Protocol;
+                let mut relay_addr = addr.clone();
+                if matches!(relay_addr.iter().last(), Some(Protocol::P2p(_))) {
+                    relay_addr.pop();
+                }
+                let circuit_addr = relay_addr
+                    .with(Protocol::P2p(peer_id))
+                    .with(Protocol::P2pCircuit);
+                match swarm.listen_on(circuit_addr.clone()) {
+                    Ok(lid) => {
+                        state.circuit_listeners.insert(peer_id, lid);
+                        info!(%peer_id, %circuit_addr, ?lid, "relay: requesting reservation");
+                    }
+                    Err(e) => {
+                        state.relay_reserved.remove(&peer_id);
+                        warn!(%peer_id, error = %e, "relay: listen_on circuit failed");
                     }
                 }
             }

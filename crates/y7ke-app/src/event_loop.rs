@@ -100,14 +100,16 @@ async fn dispatch(
                     .entry(y7)
                     .or_default()
                     .insert(connection_id, entry);
-                let best = crate::app::refresh_presence(inner, y7).await;
+                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
                 // Peer is reachable again — drop its reconnect backoff so
                 // a future disconnect retries immediately rather than
                 // inheriting a stale long cooldown.
                 inner.reconnect_backoff.write().await.remove(&y7);
+                tracing::info!(%y7, ?best, ?transport, "presence: connection established");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
+                    transport,
                 });
                 drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
@@ -149,11 +151,12 @@ async fn dispatch(
                         })
                         .kind = kind;
                 }
-                let best = crate::app::refresh_presence(inner, y7).await;
-                tracing::info!(%y7, ?kind, ?best, "presence upgraded via DCUtR");
+                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
+                tracing::info!(%y7, ?kind, ?best, ?transport, "presence upgraded via DCUtR");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
+                    transport,
                 });
             }
             Ok(())
@@ -202,11 +205,12 @@ async fn dispatch(
                 if fully_gone {
                     inner.rate_limiter.forget(peer).await;
                 }
-                let best = crate::app::refresh_presence(inner, y7).await;
-                tracing::debug!(%y7, ?best, "connection closed → presence recomputed");
+                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
+                tracing::debug!(%y7, ?best, ?transport, "connection closed → presence recomputed");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
+                    transport,
                 });
             } else {
                 tracing::debug!(%peer, "connection closed for non-Ed25519 peer");

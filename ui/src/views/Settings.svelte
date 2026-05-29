@@ -130,8 +130,11 @@
   }
 
   // Loose regex — matches the visible structure. Backend does real parsing.
+  // Accepts the transport-agnostic shorthand (/net/host/PORT/p2p/id), an
+  // explicit /tcp, and an explicit /udp/.../quic-v1. The middle group is
+  // the only part that varies between the three forms.
   const MULTIADDR_RE =
-    /^\/(dns4|dns6|ip4|ip6)\/[^/]+\/tcp\/\d+\/p2p\/12D3KooW[a-zA-Z0-9]+$/;
+    /^\/(dns4|dns6|ip4|ip6)\/[^/]+\/(tcp\/\d+|udp\/\d+\/quic-v1|\d+)\/p2p\/12D3KooW[a-zA-Z0-9]+$/;
 
   function isLikelyMultiaddr(s: string): boolean {
     return MULTIADDR_RE.test(s.trim());
@@ -334,7 +337,7 @@
                   class:locked={r.is_default}
                   value={r.multiaddr}
                   readonly={r.is_default}
-                  placeholder="/dns4/host/tcp/4101/p2p/12D3KooW…"
+                  placeholder="/dns4/host/4101/p2p/12D3KooW…"
                   spellcheck="false"
                   aria-label="bootstrap multiaddr"
                   oninput={(e) =>

@@ -85,10 +85,12 @@ impl AppHandle {
             // live LAN/Direct peer Offline in the UI until its next event.
             if let Ok(contacts) = self.inner.db.contacts().list().await {
                 for c in contacts {
-                    let best = crate::app::refresh_presence(&self.inner, c.y7_id).await;
+                    let (best, transport) =
+                        crate::app::refresh_presence(&self.inner, c.y7_id).await;
                     let _ = self.event_tx.send(AppEvent::PresenceChanged {
                         y7_id: c.y7_id.to_uri(),
                         connection: best,
+                        transport,
                     });
                 }
             }
@@ -240,18 +242,17 @@ fn make_entry(
 /// open a TCP connection, timing the round-trip. Anything we can't
 /// resolve to `host:port` counts as a failure.
 async fn ping_one(addr_str: &str) -> BootstrapPingState {
-    let addr = match addr_str.parse::<Multiaddr>() {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::debug!(addr = %addr_str, error = %e, "ping: multiaddr parse failed");
-            return BootstrapPingState {
-                last_ping_ms: None,
-                last_ping_failed: true,
-            };
-        }
-    };
-    let Some((host, port)) = host_port_from_multiaddr(&addr) else {
-        tracing::debug!(addr = %addr_str, "ping: no /tcp + host component");
+    // A transport-agnostic shorthand (/net/host/PORT/p2p/id) has no /tcp,
+    // so it won't parse as a Multiaddr. Expand it first and probe the TCP
+    // form (a TCP connect is the cheapest reachability check; if the port
+    // is open for TCP it's open for QUIC's UDP on the same number too,
+    // since the bootstrap dual-listens).
+    let host_port = y7ke_core::expand_bootstrap(addr_str)
+        .iter()
+        .find_map(|s| s.parse::<Multiaddr>().ok())
+        .and_then(|a| host_port_from_multiaddr(&a));
+    let Some((host, port)) = host_port else {
+        tracing::debug!(addr = %addr_str, "ping: no resolvable host:tcp-port");
         return BootstrapPingState {
             last_ping_ms: None,
             last_ping_failed: true,

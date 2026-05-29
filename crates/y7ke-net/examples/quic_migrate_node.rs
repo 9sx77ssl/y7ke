@@ -19,8 +19,8 @@
 use std::env;
 use std::time::Duration;
 
-use libp2p::{Multiaddr, PeerId};
 use libp2p::multiaddr::Protocol;
+use libp2p::{Multiaddr, PeerId};
 use tokio::time::timeout;
 use tracing_subscriber::EnvFilter;
 
@@ -65,7 +65,9 @@ async fn run_responder(mut net: NetHandle) -> ! {
         match net.event_rx().recv().await {
             Ok(NetEvent::Listening { addr }) => println!("LISTEN={addr}"),
             Ok(NetEvent::ConnectionEstablished {
-                connection_id, kind, ..
+                connection_id,
+                kind,
+                ..
             }) => println!("EVENT established conn={connection_id:?} kind={kind:?}"),
             Ok(NetEvent::ConnectionClosed { connection_id, .. }) => {
                 println!("EVENT closed conn={connection_id:?}")

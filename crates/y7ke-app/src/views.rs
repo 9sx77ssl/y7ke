@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use y7ke_core::{ConnectionKind, ContactStatus};
+use y7ke_core::{ConnectionKind, ContactStatus, Transport};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -15,6 +15,8 @@ pub struct ContactView {
     #[ts(type = "number")]
     pub added_at: i64,
     pub presence: ConnectionKind,
+    /// Transport of the live connection (QUIC / TCP), `None` when offline.
+    pub transport: Option<Transport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

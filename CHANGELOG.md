@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.101] — 2026-05-29
+
+- feat(net+app): transport-agnostic bootstrap + multi-addr QUIC racing + per-peer transport surfacing
+
 ## [0.1.100] — 2026-05-29
 
 - fix(ui): show "Y7net" (not "internet") for dial mode in Connectivity pane

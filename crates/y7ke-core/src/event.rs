@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::id::ConversationId;
-use crate::status::{ConnectionKind, MessageStatus, NatReachability, RequestResolution};
+use crate::status::{ConnectionKind, MessageStatus, NatReachability, RequestResolution, Transport};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -53,10 +53,13 @@ pub enum AppEvent {
         status: MessageStatus,
     },
 
-    /// Peer presence changed.
+    /// Peer presence changed. `transport` is the underlying transport of
+    /// the winning connection (QUIC / TCP), or `None` when offline or not
+    /// yet classified — the chat header renders it as "Direct · QUIC".
     PresenceChanged {
         y7_id: String,
         connection: ConnectionKind,
+        transport: Option<Transport>,
     },
 
     /// User settings (dial modes / bootstrap list) were updated.

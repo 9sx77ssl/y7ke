@@ -1,8 +1,11 @@
 <script lang="ts" module>
   import type { ConnectionKind } from "../gen/ConnectionKind";
+  import type { Transport } from "../gen/Transport";
 
   export interface ConnectionLabelProps {
     kind: ConnectionKind;
+    /** Underlying transport of the live connection (QUIC / TCP). */
+    transport?: Transport | null;
     /** Hostname shown in the relay tooltip. */
     relayHost?: string;
   }
@@ -11,20 +14,24 @@
 </script>
 
 <script lang="ts">
-  // V2-A4: small uppercase label that sits next to a peer's nickname and
-  // surfaces *how* the connection is carried (LAN / Internet / Relay /
-  // Direct). The StatusDot already says online-vs-offline; this label
-  // adds the transport-kind nuance. Hidden for offline / connecting —
-  // the dot speaks for those.
+  // V2-A4/A5: small uppercase label that sits next to a peer's nickname
+  // and surfaces *how* the connection is carried (LAN / Internet / Relay /
+  // Direct) plus the transport (QUIC / TCP), e.g. "DIRECT · QUIC". The
+  // StatusDot already says online-vs-offline; this label adds the
+  // path+transport nuance. Hidden for offline / connecting — the dot
+  // speaks for those.
 
-  let { kind, relayHost = "bootstrap1.y7v.lol" }: ConnectionLabelProps =
-    $props();
+  let {
+    kind,
+    transport = null,
+    relayHost = "bootstrap1.y7v.lol",
+  }: ConnectionLabelProps = $props();
 
-  const label = $derived(labelFor(kind));
-  const tooltip = $derived(tooltipFor(kind, relayHost));
+  const label = $derived(labelFor(kind, transport));
+  const tooltip = $derived(tooltipFor(kind, relayHost, transport));
   const tone = $derived(toneFor(kind));
 
-  function labelFor(k: ConnectionKind): string | null {
+  function baseLabel(k: ConnectionKind): string | null {
     switch (k) {
       case "lan":
         return "LAN";
@@ -40,16 +47,27 @@
     }
   }
 
-  function tooltipFor(k: ConnectionKind, host: string): string {
+  function labelFor(k: ConnectionKind, t: Transport | null): string | null {
+    const base = baseLabel(k);
+    if (base === null) return null;
+    return t === null ? base : `${base} · ${t.toUpperCase()}`;
+  }
+
+  function tooltipFor(
+    k: ConnectionKind,
+    host: string,
+    t: Transport | null,
+  ): string {
+    const via = t === null ? "" : ` over ${t.toUpperCase()}`;
     switch (k) {
       case "lan":
-        return "connected over LAN (mDNS-discovered)";
+        return `connected over LAN (mDNS-discovered)${via}`;
       case "internet":
-        return "direct internet connection";
+        return `direct internet connection${via}`;
       case "relayed":
-        return `relayed via ${host} — end-to-end encrypted, latency may be slightly higher`;
+        return `relayed via ${host}${via} — end-to-end encrypted, latency may be slightly higher`;
       case "direct":
-        return "direct p2p connection (hole-punched through bootstrap)";
+        return `direct p2p connection (hole-punched through bootstrap)${via}`;
       case "offline":
       case "connecting":
         return "";

@@ -32,13 +32,16 @@ struct BootstrapFile {
 pub async fn load_bootstraps(db: &Db) -> Vec<Multiaddr> {
     let mut result = load_user_sources(db).await;
 
-    // Prepend hardcoded default, deduped.
-    if let Ok(default) = DEFAULT_RELAY_BOOTSTRAP.parse::<Multiaddr>() {
-        if !result.iter().any(|m| m == &default) {
-            result.insert(0, default);
+    // Prepend the hardcoded default (expanded to its TCP+QUIC pair), deduped.
+    // .rev() so the pair keeps its tcp-then-quic order after the inserts.
+    let defaults = parse_multiaddrs(std::iter::once(DEFAULT_RELAY_BOOTSTRAP), "default-relay");
+    if defaults.is_empty() {
+        tracing::error!("DEFAULT_RELAY_BOOTSTRAP expanded to nothing — check the constant");
+    }
+    for d in defaults.into_iter().rev() {
+        if !result.iter().any(|m| m == &d) {
+            result.insert(0, d);
         }
-    } else {
-        tracing::error!("DEFAULT_RELAY_BOOTSTRAP failed to parse — check the constant");
     }
     result
 }
@@ -104,11 +107,11 @@ async fn load_user_sources(db: &Db) -> Vec<Multiaddr> {
         }
     }
 
-    // 4. Compile-time defaults.
-    let defaults: Vec<Multiaddr> = y7ke_net::DEFAULT_BOOTSTRAPS
-        .iter()
-        .filter_map(|s| s.parse().ok())
-        .collect();
+    // 4. Compile-time defaults (also descriptors — expand them).
+    let defaults: Vec<Multiaddr> = parse_multiaddrs(
+        y7ke_net::DEFAULT_BOOTSTRAPS.iter().copied(),
+        "compile-default",
+    );
     if !defaults.is_empty() {
         tracing::info!(
             count = defaults.len(),
@@ -120,17 +123,29 @@ async fn load_user_sources(db: &Db) -> Vec<Multiaddr> {
     defaults
 }
 
+/// Parse bootstrap descriptor strings into multiaddrs. Each descriptor is
+/// first run through `expand_bootstrap`, so a transport-agnostic shorthand
+/// (`/dns4/host/4101/p2p/<id>`) becomes BOTH a TCP and a QUIC multiaddr;
+/// explicit multiaddrs pass through unchanged. Invalid entries are logged
+/// and skipped. The result is deduped so the explicit and shorthand forms
+/// of the same addr don't double-dial.
 fn parse_multiaddrs<'a, I: Iterator<Item = &'a str>>(it: I, source: &str) -> Vec<Multiaddr> {
-    it.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .filter_map(|s| match s.parse::<Multiaddr>() {
-            Ok(m) => Some(m),
-            Err(e) => {
-                tracing::warn!(addr = %s, source = %source, error = %e, "bootstrap entry rejected");
-                None
+    let mut out: Vec<Multiaddr> = Vec::new();
+    for entry in it.map(str::trim).filter(|s| !s.is_empty()) {
+        for expanded in y7ke_core::expand_bootstrap(entry) {
+            match expanded.parse::<Multiaddr>() {
+                Ok(m) => {
+                    if !out.contains(&m) {
+                        out.push(m);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(addr = %expanded, source = %source, error = %e, "bootstrap entry rejected");
+                }
             }
-        })
-        .collect()
+        }
+    }
+    out
 }
 
 fn bootstrap_toml_path() -> Option<PathBuf> {
