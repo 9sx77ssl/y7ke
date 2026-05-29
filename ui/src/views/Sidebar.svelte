@@ -43,6 +43,9 @@
   let deleteOpen = $state(false);
   let deleteTarget = $state<string | null>(null);
 
+  // Donate link: the kaomoji shifts a hair on hover (>//< → >///<).
+  let donateHover = $state(false);
+
   function openContextMenu(e: MouseEvent, y7Id: string) {
     e.preventDefault();
     e.stopPropagation();
@@ -160,6 +163,9 @@
 
   <div class="section-head">
     <span class="section-title">contacts</span>
+    {#if contacts.visible.length > 0}
+      <span class="section-count">{contacts.visible.length}</span>
+    {/if}
   </div>
 
   <ul class="contacts">
@@ -195,13 +201,18 @@
     {/each}
   </ul>
 
-  <div class="footer" aria-hidden="true">
-    {#if contacts.visible.length > 0}
-      <span class="count">
-        {contacts.visible.length}
-        {contacts.visible.length === 1 ? "contact" : "contacts"}
-      </span>
-    {/if}
+  <div class="footer">
+    <!-- Placeholder link — swap href for the in-app donate route once it exists. -->
+    <a
+      class="donate"
+      href="#"
+      title="support y7ke"
+      onmouseenter={() => (donateHover = true)}
+      onmouseleave={() => (donateHover = false)}
+      onclick={(e) => e.preventDefault()}
+    >
+      donate {donateHover ? ">///<" : ">//<"}
+    </a>
   </div>
 </aside>
 
@@ -255,6 +266,12 @@
     text-transform: lowercase;
     letter-spacing: 0.08em;
   }
+  /* Bare contact count, pinned right of the "contacts" head (hidden at 0). */
+  .section-count {
+    font-size: var(--y7-fs-xs);
+    color: var(--y7-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
 
   .contacts {
     list-style: none;
@@ -287,5 +304,17 @@
     min-height: 26px;
     display: flex;
     align-items: center;
+  }
+  /* donate link — subtle: just a hair brighter on hover (the kaomoji also
+   * gains one extra > via the hovered state). */
+  .donate {
+    color: var(--y7-text-muted);
+    text-decoration: none;
+    transition: color var(--y7-dur-fast) var(--y7-ease);
+  }
+  .donate:hover,
+  .donate:focus-visible {
+    color: var(--y7-text-secondary);
+    outline: none;
   }
 </style>
