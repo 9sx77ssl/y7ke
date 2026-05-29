@@ -91,7 +91,7 @@ impl AppHandle {
     /// - `Internet`: all 4 steps. Step 3 (Kad) returns relay
     ///   multiaddrs naturally; direct dial preferred via
     ///   `sort_addrs_for_dial`.
-    async fn dial_with_discovery(&self, peer: Y7Id) {
+    pub(crate) async fn dial_with_discovery(&self, peer: Y7Id) {
         let mode = match self.inner.db.settings().get().await {
             Ok(s) => s.dial_mode,
             Err(e) => {
@@ -194,18 +194,48 @@ impl AppHandle {
             }
         }
 
-        // 4. Last resort: ask the swarm once more — by now Kad may have
-        //    populated routing.
+        // 4. Re-check the swarm — by now Kad may have populated routing.
         match self.inner.net.dial(peer).await {
             Ok(true) => {
                 tracing::info!(%peer, "discovery: step 4 (re-check swarm) issued dial");
+                return;
             }
             Ok(false) => {
-                tracing::warn!(%peer, "discovery: all 4 paths exhausted — peer unreachable");
+                tracing::info!(%peer, "discovery: step 4 — still no direct addr");
             }
             Err(e) => {
                 tracing::warn!(%peer, error = %e, "discovery: step 4 dial command failed");
             }
+        }
+
+        // 5. Port-stable relay-circuit fallback. After a restart the peer's
+        //    direct addrs (ports) change and Kad may be cold, but a circuit
+        //    address routes through the FIXED bootstrap relay and is
+        //    independent of the peer's ports — the most reliable re-find for
+        //    the NAT-bound ↔ public case. Construct
+        //    `<bootstrap>/p2p-circuit/p2p/<target>` for each configured
+        //    bootstrap and dial it; the relay forwards iff the target has a
+        //    reservation (i.e. is online), so this self-limits and, once the
+        //    peer is back online, re-establishes connectivity which then
+        //    triggers ConnectionEstablished → queue drain + sync + DCUtR.
+        let Ok(target) = y7ke_net::peer_id_from_y7(&peer) else {
+            return;
+        };
+        let bootstraps = crate::config::load_bootstraps(&self.inner.db).await;
+        let mut issued = 0usize;
+        for relay in bootstraps {
+            let circuit = relay
+                .with(libp2p::multiaddr::Protocol::P2pCircuit)
+                .with(libp2p::multiaddr::Protocol::P2p(target));
+            tracing::debug!(%peer, addr = %circuit, "discovery: step 5 — relay-circuit fallback");
+            if self.inner.net.dial_address(circuit).await.is_ok() {
+                issued += 1;
+            }
+        }
+        if issued > 0 {
+            tracing::info!(%peer, issued, "discovery: step 5 — relay-circuit dials issued");
+        } else {
+            tracing::warn!(%peer, "discovery: all paths (incl. relay-circuit) exhausted");
         }
     }
 

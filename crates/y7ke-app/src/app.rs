@@ -281,6 +281,36 @@ impl AppHandle {
             run_presence_ticker(presence_inner, presence_event_tx).await;
         });
 
+        // Proactive reconnect on launch: dial every Accepted contact through
+        // the full Kad/relay-circuit discovery chain so queued messages drain
+        // and presence reflects reality WITHOUT the user having to manually
+        // send first. Without this, boot only connects to the bootstrap and
+        // reservation; contacts weren't re-dialed until a manual send or the
+        // 30s ticker. Bounded internally by the kad_lookups semaphore + the
+        // per-peer backoff; LanOnly short-circuits inside dial_with_discovery.
+        let boot_handle = Self {
+            inner: Arc::clone(&inner),
+            event_tx: event_tx.clone(),
+        };
+        tokio::spawn(async move {
+            let contacts = match boot_handle.inner.db.contacts().list().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::debug!(error = %e, "boot reconnect: contacts.list failed");
+                    return;
+                }
+            };
+            for c in contacts
+                .into_iter()
+                .filter(|c| c.status == y7ke_core::ContactStatus::Accepted)
+            {
+                // Small jitter so N contacts don't fan out on the same instant.
+                let j = std::time::Duration::from_millis(rand::random::<u64>() % 750);
+                tokio::time::sleep(j).await;
+                boot_handle.dial_with_discovery(c.y7_id).await;
+            }
+        });
+
         // Best-effort; no subscribers yet at boot.
         let _ = event_tx.send(AppEvent::IdentityReady {
             y7_id: my_y7_id.to_uri(),
@@ -449,10 +479,13 @@ async fn run_presence_ticker(
 
             match current_presence {
                 ConnectionKind::Offline => {
-                    // Soft redial — best-effort, no Kad here. Gated by a
-                    // per-peer exponential backoff so a permanently-gone
-                    // contact decays from once-per-tick to once-per-10min
-                    // instead of being dialed on every tick forever.
+                    // Full discovery chain (swarm book → cached addrs → Kad →
+                    // relay-circuit fallback) — NOT the old address-book-only
+                    // soft dial, which no-ops after a restart (ports changed,
+                    // book empty) and so never re-found a moved peer. Gated by
+                    // a per-peer exponential backoff so a permanently-gone
+                    // contact decays from once-per-tick to once-per-10min, and
+                    // the chain itself is bounded by the kad_lookups semaphore.
                     let now = std::time::Instant::now();
                     // 0–500ms jitter desyncs peers that all went offline
                     // together (suspend/resume) so they don't re-dial on
@@ -471,40 +504,79 @@ async fn run_presence_ticker(
                         }
                     };
                     if should_dial {
-                        if let Ok(true) = inner.net.dial(c.y7_id).await {
-                            tracing::debug!(y7_id = %c.y7_id, "presence ticker: soft redial issued");
-                        }
+                        let handle = AppHandle {
+                            inner: Arc::clone(&inner),
+                            event_tx: event_tx.clone(),
+                        };
+                        tracing::debug!(y7_id = %c.y7_id, "presence ticker: discovery redial");
+                        handle.dial_with_discovery(c.y7_id).await;
                     }
                 }
                 ConnectionKind::Relayed => {
-                    // V2-A5 "relay is temporary": attempt a relay→direct
-                    // upgrade in an early burst (ticks 0, 5, 10 — when the
-                    // identify-pushed observed addrs are freshest), then
-                    // settle to one attempt every 20 ticks (~10 min)
-                    // indefinitely. Periodic-not-permanent honours "relay
-                    // is temporary" (NAT conditions may change) without
-                    // the every-tick storm the old `>= 20` clause caused.
-                    // The counter resets on AutoNAT verdict flip
-                    // (handle_nat_status) and on ConnectionClosed.
-                    let attempts = {
-                        let mut bo = inner.upgrade_backoff.write().await;
-                        let n = bo.entry(c.y7_id).or_insert(0);
-                        let old = *n;
-                        *n = n.saturating_add(1);
-                        old
-                    };
-                    let should_try = should_attempt_upgrade(attempts);
-                    if should_try {
-                        // Live check first — don't fire if the relay
-                        // connection died between events.
-                        if let Ok(true) = inner.net.check_live(c.y7_id).await {
-                            if let Ok(true) = inner.net.dial(c.y7_id).await {
-                                tracing::debug!(
-                                    y7_id = %c.y7_id,
-                                    attempts,
-                                    "presence ticker: relay→direct upgrade dial issued"
-                                );
+                    // Demote-if-dead FIRST. Previously the relayed arm never
+                    // checked liveness, so a relayed peer whose socket died
+                    // stayed falsely ONLINE — and, being non-Offline, it also
+                    // skipped the Offline redial path, stranding it. Mirror
+                    // the `_` arm: snapshot conn ids, and on a dead socket
+                    // remove them + recompute presence so the GUI flips
+                    // promptly and the next tick can re-discover.
+                    let snapshot: Vec<ConnectionId> = inner
+                        .connections
+                        .read()
+                        .await
+                        .get(&c.y7_id)
+                        .map(|m| m.keys().copied().collect())
+                        .unwrap_or_default();
+                    match inner.net.check_live(c.y7_id).await {
+                        Ok(false) => {
+                            {
+                                let mut conns = inner.connections.write().await;
+                                if let Some(by_id) = conns.get_mut(&c.y7_id) {
+                                    for id in &snapshot {
+                                        by_id.remove(id);
+                                    }
+                                    if by_id.is_empty() {
+                                        conns.remove(&c.y7_id);
+                                    }
+                                }
                             }
+                            let (best, transport) =
+                                crate::app::refresh_presence(&inner, c.y7_id).await;
+                            tracing::info!(
+                                y7_id = %c.y7_id,
+                                "presence ticker: relayed socket gone → offline"
+                            );
+                            let _ = event_tx.send(AppEvent::PresenceChanged {
+                                y7_id: c.y7_id.to_uri(),
+                                connection: best,
+                                transport,
+                            });
+                        }
+                        Ok(true) => {
+                            // Alive — V2-A5 "relay is temporary": attempt a
+                            // relay→direct upgrade in an early burst (ticks 0,
+                            // 5, 10, freshest observed addrs) then once every
+                            // ~20 ticks. Counter resets on AutoNAT flip /
+                            // ConnectionClosed.
+                            let attempts = {
+                                let mut bo = inner.upgrade_backoff.write().await;
+                                let n = bo.entry(c.y7_id).or_insert(0);
+                                let old = *n;
+                                *n = n.saturating_add(1);
+                                old
+                            };
+                            if should_attempt_upgrade(attempts) {
+                                if let Ok(true) = inner.net.dial(c.y7_id).await {
+                                    tracing::debug!(
+                                        y7_id = %c.y7_id,
+                                        attempts,
+                                        "presence ticker: relay→direct upgrade dial issued"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!(y7_id = %c.y7_id, error = %e, "relayed check_live failed");
                         }
                     }
                 }
