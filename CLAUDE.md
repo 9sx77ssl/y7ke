@@ -1,7 +1,8 @@
-# Y7KE — guide for AI assistants
+# CLAUDE.md
 
-This file primes any AI coding assistant working in this repo. Keep it
-short and load-bearing; the source code is the source of truth.
+This file provides guidance to Claude Code (claude.ai/code) when working
+with code in this repository. Keep it short and load-bearing; the source
+code is the source of truth.
 
 ## Product
 
@@ -20,8 +21,8 @@ crates/y7ke-app        # composition root — owns Db + NetHandle, runs event_lo
 src-tauri              # Tauri 2 shell, command surface, event channel
 ui                     # Svelte 5 + Vite + TypeScript
 ui/src/lib/gen         # ts-rs-generated types (do not edit by hand)
-scripts/hooks          # git hooks (auto-bump version on commit)
-docs/                  # ARCHITECTURE, ROADMAP
+scripts/hooks          # git hooks (auto-bump version + CHANGELOG on commit)
+docs/                  # ARCHITECTURE, ROADMAP, LIVE_SMOKE (cross-NAT runbook)
 ```
 
 ## Conventions
@@ -138,6 +139,25 @@ cd ui && pnpm tsc --noEmit
   on a bootstrap clears `state.relay_reserved` so the redial re-runs
   `listen_on(/p2p-circuit)`. Don't introduce a faster spin loop —
   it'll hammer the VPS during legitimate outages.
+- **Frameless window is shown after GTK realizes it.** The main window is
+  `"visible": false` in `src-tauri/tauri.conf.json`; `main.rs` reveals it
+  (`get_webview_window("main").center()/.show()`) on a short post-`setup()`
+  tick. Showing immediately on webkit2gtk (Linux) paints the first frame
+  against an unsettled allocation → the `100dvh` root collapses (cramped
+  layout, a different window size each launch). Don't drop `visible:false`
+  or the Rust show. Rust-side `show()` needs no ACL capability; a JS
+  `show()` would be rejected (`core:window:default` lacks `allow-show`).
+- **Versioning + release are hook- and push-driven.** `scripts/hooks/pre-commit`
+  bumps the patch version across `Cargo.toml`, `src-tauri/tauri.conf.json`,
+  and `ui/package.json`; `post-commit` prepends a `CHANGELOG.md` entry with
+  the commit subject and amends. Pushing `main` triggers
+  `.github/workflows/release.yml`, which resolves the version from
+  `Cargo.toml`, creates the matching `vX.Y.Z` tag, builds the Linux AppImage
+  + Windows NSIS bundles, and publishes a GitHub release whose body is the
+  matching `## [X.Y.Z]` CHANGELOG section. The release `build` is gated on
+  fmt + clippy + tests + tsc + UI build. To land an exact version (e.g. a
+  minor/major) without the patch bump, commit `--no-verify` and write the
+  CHANGELOG section by hand.
 
 ## V2-A4 notes (circuit relay + Settings)
 
