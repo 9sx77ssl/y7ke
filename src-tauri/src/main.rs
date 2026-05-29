@@ -43,6 +43,28 @@ fn main() {
             let state = Arc::new(AppState::new());
             app.manage(Arc::clone(&state));
 
+            // Reveal the window only AFTER GTK has realized it and the
+            // webview has settled its allocation + devicePixelRatio. A
+            // frameless webkit2gtk window shown immediately paints its first
+            // frame against an unsettled allocation, so the height:100% root
+            // collapses (cramped sidebar / misplaced fields) and GTK rounds
+            // the scale factor non-deterministically — which is why the
+            // window opened a different size every launch. Showing on a short
+            // post-setup tick (independent of the slower backend boot, so a
+            // boot failure still reveals the window) defers the first visible
+            // frame past realize. The window is created `visible:false`.
+            {
+                let reveal = app.handle().clone();
+                async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    if let Some(w) = reveal.get_webview_window("main") {
+                        let _ = w.center();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                });
+            }
+
             let emitter = app.handle().clone();
             async_runtime::spawn(async move {
                 let config = match AppConfig::default_for_app() {

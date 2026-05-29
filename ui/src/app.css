@@ -10,6 +10,11 @@
 #app {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* Viewport-anchored, not chain-anchored: dvh resolves against the visual
+   * viewport directly, so the flex column takes real height even if the
+   * body's computed height hasn't settled during the webview's first paint
+   * (the height:100% chain can transiently collapse on webkit2gtk). */
+  height: 100vh;
+  height: 100dvh;
   background: var(--y7-bg-base);
 }

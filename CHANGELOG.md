@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.2] — 2026-05-29
+
+- fix(ui): show window after GTK realizes it — crisp, consistent frameless layout on Linux
+
 ## [3.0.1] — 2026-05-29
 
 - fix(ui): solid (non-transparent) frameless window — kills Linux first-paint layout breakage
