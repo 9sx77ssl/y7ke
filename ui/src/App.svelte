@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { invoke } from "@tauri-apps/api/core";
   import { identity, loadIdentity } from "./lib/stores/identity.svelte";
   import { startEventDispatch, stopEventDispatch } from "./lib/stores/events.svelte";
   import IdentitySetup from "./views/IdentitySetup.svelte";
@@ -26,6 +27,19 @@
     // Tear down the singleton Tauri listener if App ever unmounts (it's the
     // root today, so this is hygiene rather than a live leak).
     return () => stopEventDispatch();
+  });
+
+  // Reveal the (visible:false) window only after we've painted a first frame
+  // at the correct viewport size. Two rAFs guarantee a layout+paint cycle
+  // completed, so the frameless webkit2gtk window is never shown against an
+  // unsettled GTK allocation (the cramped-layout / different-size-each-launch
+  // bug). Race-free vs the Rust fallback timer; reveal_window is idempotent.
+  $effect(() => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        void invoke("reveal_window").catch(() => {});
+      }),
+    );
   });
 </script>
 

@@ -163,6 +163,20 @@ pub async fn boot_ready(app: S<'_>) -> Result<bool, String> {
     Ok(app.try_get().await.is_some())
 }
 
+/// Reveal the main window. The window is created `visible:false`; the UI
+/// calls this after its first paint so the frameless webkit2gtk window is
+/// shown only once it has a correct frame (race-free vs a fixed timer — see
+/// the reveal note in main.rs). Idempotent: the boot fallback may also show
+/// it, and a second show() is a no-op.
+#[tauri::command]
+pub fn reveal_window(window: tauri::WebviewWindow) {
+    if !window.is_visible().unwrap_or(false) {
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[tauri::command]
 pub async fn get_settings(app: S<'_>) -> Result<Settings, String> {
     app.get().await.get_settings().await.map_err(err)

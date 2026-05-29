@@ -43,24 +43,26 @@ fn main() {
             let state = Arc::new(AppState::new());
             app.manage(Arc::clone(&state));
 
-            // Reveal the window only AFTER GTK has realized it and the
-            // webview has settled its allocation + devicePixelRatio. A
-            // frameless webkit2gtk window shown immediately paints its first
-            // frame against an unsettled allocation, so the height:100% root
-            // collapses (cramped sidebar / misplaced fields) and GTK rounds
-            // the scale factor non-deterministically — which is why the
-            // window opened a different size every launch. Showing on a short
-            // post-setup tick (independent of the slower backend boot, so a
-            // boot failure still reveals the window) defers the first visible
-            // frame past realize. The window is created `visible:false`.
+            // The window is created `visible:false` and revealed only after
+            // the webview has painted a correct first frame — otherwise a
+            // frameless webkit2gtk window paints against an unsettled GTK
+            // allocation (cramped layout + a different physical size each
+            // launch). The PRIMARY reveal is driven by the frontend: the UI
+            // calls the `reveal_window` command after its first paint
+            // (App.svelte), which is race-free — by then GTK has definitely
+            // realized the window. This long fallback only fires if the UI
+            // never signals (e.g. a JS load failure) so the window can never
+            // get stuck invisible.
             {
                 let reveal = app.handle().clone();
                 async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
                     if let Some(w) = reveal.get_webview_window("main") {
-                        let _ = w.center();
-                        let _ = w.show();
-                        let _ = w.set_focus();
+                        if !w.is_visible().unwrap_or(false) {
+                            let _ = w.center();
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
                     }
                 });
             }
@@ -151,6 +153,7 @@ fn main() {
             commands::get_nat_status,
             commands::get_diagnostics_detail,
             commands::list_active_connections,
+            commands::reveal_window,
         ])
         .run(tauri::generate_context!());
 

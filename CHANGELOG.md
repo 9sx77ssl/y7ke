@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.8] — 2026-05-29
+
+- fix(ui): robust window reveal (frontend-driven) + position:fixed root — kill the recurring Linux first-paint bug
+
 ## [3.0.7] — 2026-05-29
 
 - docs(claude): standard header + window show-after-ready & release-pipeline pins
