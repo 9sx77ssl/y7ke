@@ -8,8 +8,11 @@ and defines a phased implementation roadmap.
 
 **Status of the codebase at the time of writing.** V2-A4 (Circuit
 Relay v2 client + server), V2-A5 (DCUtR), V2-A6 (QUIC transport)
-and the `DialMode` redesign (`LanOnly` / `Internet` / `P2p`) shipped
-in `v0.1.61`. Loopback tests (`four_node_relay`, `v2_dcutr_smoke`,
+and the `DialMode` redesign shipped in `v0.1.61` as
+`LanOnly` / `Internet` / `P2p`; `P2p` was later dropped (storage
+migration 0006) as a behavioural duplicate of `Internet`, leaving
+two modes — `LanOnly` and `Internet` ("Y7net" in the GUI). Loopback
+tests (`four_node_relay`, `v2_dcutr_smoke`,
 `quic_listen_smoke`) and the live `live_relay_smoke` against
 `bootstrap1.y7v.lol` v0.1.4 prove the wire paths exist. Cross-NAT
 real-world success is **untested in CI** and qualitatively weak in
@@ -127,9 +130,11 @@ Tox's DHT is a Kademlia variant routing by raw Ed25519 pubkey
 XOR distance; bootstrap nodes are just long-lived DHT participants
 with hard-coded (pubkey, IP) tuples — the **exact pattern** Y7KE
 uses (`crates/y7ke-net/src/swarm.rs::DEFAULT_BOOTSTRAPS`,
-`/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…`). Tox's TCP relay
-fallback is stateless and ciphertext-only — same invariant Y7KE
-preserves.
+`/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooW…` — a transport-agnostic
+shorthand, no `/tcp` or `/udp`, expanded client-side by
+`y7ke_core::expand_bootstrap` into both a TCP and a QUIC multiaddr).
+Tox's TCP relay fallback is stateless and ciphertext-only — same
+invariant Y7KE preserves.
 
 **Anti-pattern Y7KE rejects:** Tox has no DCUtR-equivalent. Once
 on TCP relay, the connection stays on TCP relay for its lifetime,
@@ -336,8 +341,8 @@ Boot
  ├─► listen on /ip4/0.0.0.0/tcp/0 + /ip4/0.0.0.0/udp/0/quic-v1
  │
  ├─► If dial_mode != LanOnly:
- │     ├─► dial each bootstrap (TCP + QUIC racing — direct QUIC wins
- │     │   on most paths)
+ │     ├─► expand_bootstrap shorthand → {tcp, udp/quic-v1}; dial each
+ │     │   bootstrap with both via one DialOpts (QUIC wins on most paths)
  │     ├─► identify push lands on both sides; AutoNAT v2 probe runs
  │     │   ──► verdict: Public | Private | Unknown
  │     ├─► If Private: swarm.listen_on(<bootstrap>/p2p-circuit) —
@@ -371,7 +376,9 @@ Boot
  │     │   best_kind precedence (Direct=5 > Lan=4 > Internet=3 > Relayed=2)
  │     │   reports Direct
  │     ├─► AppEvent::PresenceChanged { kind: Direct, transport: Quic|Tcp }
- │     ├─► UI badge flips RELAY → DIRECT, lilac → green
+ │     ├─► UI badge flips RELAY → DIRECT, lilac → green; the chat
+ │     │   header ConnectionLabel renders e.g. "DIRECT · QUIC"
+ │     │   (transport rides on PresenceChanged + ContactView)
  │     └─► /sync/1.0.0 + /msg/1.0.0 traffic migrates to direct path
  │
  ├─► Network change (Wi-Fi swap, suspend/resume):
@@ -506,12 +513,15 @@ Currently:
 - `sort_addrs_for_dial` (`dial_priority.rs`) ranks QUIC > TCP >
   circuit, so when Kad returns a mixed set we dial QUIC candidates
   first.
-- **Gap:** the bootstrap is TCP-only. Clients can never reach the
-  bootstrap over QUIC, defeating the "QUIC-first" story for the
-  most important connection. Phase 2 step 5 closes this by adding
-  `.with_quic()` to the bootstrap build chain and updating
-  `DEFAULT_BOOTSTRAPS` with the matching `udp/.../quic-v1`
-  multiaddr.
+- The bootstrap descriptor is the transport-agnostic shorthand
+  (`/dns4/host/<port>/p2p/<id>`); `y7ke_core::expand_bootstrap`
+  expands it to both `/tcp/<port>` and `/udp/<port>/quic-v1` and the
+  swarm dials both via a single `DialOpts` (`bootstrap_peers` is a
+  `HashMap<PeerId, Vec<Multiaddr>>`, one peer → many transports).
+  QUIC wins on UDP-open networks — the path that enables direct
+  hole-punch; TCP is the fallback. The bootstrap daemon (v0.1.6)
+  listens on both transports and prints the shorthand descriptor on
+  startup for operators to paste into clients.
 
 ### Connection migration
 
@@ -814,8 +824,9 @@ clean test boundary.
 - ✓ Circuit Relay v2 client + server
 - ✓ Auto-reconnect on bootstrap drop (15 s)
 - ✓ Reservation refresh on reconnect
-- ✓ DialMode mutual-exclusivity (LanOnly / Internet / P2p) + live
-  apply
+- ✓ DialMode mutual-exclusivity + live apply (shipped as
+  LanOnly / Internet / P2p; `P2p` later dropped via migration 0006,
+  leaving LanOnly / Internet — "lan only" / "Y7net" in the GUI)
 - ✓ External-addr advertisement on bootstrap
 
 Risk closed. Rollback: not needed (shipped).

@@ -122,7 +122,8 @@ each step gated by the user's current dial modes:
    include relay multiaddrs of the form
    `/dns4/<bootstrap>/.../p2p-circuit/p2p/<peer>` once the peer has
    reserved a slot
-4. Direct TCP dial of every returned multiaddr, in order
+4. Direct dial of every returned multiaddr, in order (shorthand
+   entries expand to both TCP and QUIC, raced with QUIC preferred)
 
 Each client proactively reserves a `/p2p-circuit` slot at every
 configured bootstrap on connect. The bootstrap forwards encrypted
@@ -148,13 +149,17 @@ Bootstraps are sourced in this order, first non-empty wins:
    File format:
    ```toml
    peers = [
-     "/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooW…",
+     "/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooW…",
    ]
    ```
+   The transport-agnostic shorthand (no `/tcp` or `/udp` segment) is
+   auto-expanded by the client into both a TCP and a QUIC multiaddr;
+   it dials both and prefers QUIC. Explicit `/tcp` or `/udp`
+   multiaddrs pass through unchanged.
 4. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded fallback at build
    time, currently `bootstrap1.y7v.lol` (Germany), PeerId
    `12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`. Raw-IP
-   fallback `/ip4/89.35.130.67/tcp/4101/…` if DNS isn't resolving.
+   fallback `/ip4/89.35.130.67/4101/…` if DNS isn't resolving.
 
 Whatever source contributes them, the hardcoded
 `DEFAULT_RELAY_BOOTSTRAP` is **always prepended** (deduped) so a
@@ -191,14 +196,10 @@ log lines.
 From v0.1.43, click **settings :3** in the sidebar to open the
 settings pane.
 
-- **Connection modes** — four toggle chips (`lan` / `internet` /
-  `relay` / `p2p`). `lan` uses mDNS for same-WiFi peers; `internet`
-  enables direct TCP dial via Kad-resolved addresses; `relay`
-  enables forwarding through bootstrap relays (covers NAT/CGNAT);
-  `p2p` is a placeholder for V2-A5 DCUtR hole-punching (no
-  transport effect yet). The "active strategy" hint below the
-  chips summarises the chosen combination (`auto`, `lan only`,
-  `relay-only`, `lan + relay`, etc.).
+- **Connection modes** — two modes: `lan only` and `Y7net`
+  (the `Internet` mode). `lan only` uses mDNS for same-WiFi peers;
+  `Y7net` enables Kad-resolved direct dial plus forwarding through
+  bootstrap relays (covers NAT/CGNAT).
 - **Bootstrap nodes** — the locked first row is the hardcoded
   default. Below it, user-added multiaddrs (one per row,
   `+ add bootstrap` to add a blank row). `ping all` opens a TCP

@@ -112,6 +112,23 @@ cd ui && pnpm tsc --noEmit
   resolves so the UI's Settings page can't strand the client by
   deleting all entries. UI renders it `readonly` with `is_default=true`
   and no delete button.
+- **Transport-agnostic bootstrap shorthand.** Bootstrap descriptors are
+  written WITHOUT a transport: `/dns4/host/<port>/p2p/<id>` (no `/tcp`,
+  no `/udp`). `y7ke_core::expand_bootstrap` fans each shorthand into BOTH
+  `/tcp/<port>` and `/udp/<port>/quic-v1` multiaddr strings; an explicit
+  multiaddr (already naming `/tcp` or `/udp`) passes through unchanged.
+  `app/config.rs::parse_multiaddrs` runs every descriptor through it
+  (deduped). In the swarm, `bootstrap_peers` is
+  `HashMap<PeerId, Vec<Multiaddr>>` and the build / reconnect /
+  `UpdateBootstraps` / `ApplyDialMode` paths dial every addr per peer in
+  one `DialOpts` (QUIC + TCP race; QUIC wins on UDP-open nets and enables
+  hole-punch, TCP is the fallback). Don't collapse this back to a single
+  addr per bootstrap.
+- **Connection transport is surfaced.** `AppEvent::PresenceChanged` and
+  `ContactView` carry `transport: Option<Transport>`; `refresh_presence`
+  returns `(ConnectionKind, Option<Transport>)`; the chat
+  `ConnectionLabel` renders e.g. "DIRECT · QUIC". When you add a presence
+  emit site, thread the transport through — don't drop it.
 - **`pnpm-workspace.yaml`** in `ui/` carries `onlyBuiltDependencies:
   - esbuild`. pnpm 10 ignores the equivalent `pnpm` field in
   package.json; the workspace yaml is the only path that lets a
@@ -128,10 +145,17 @@ cd ui && pnpm tsc --noEmit
   `--external-addr` / `Y7KE_BOOTSTRAP_EXTERNAL_ADDR` on the
   `y7ke-bootstrap` daemon (v0.1.4+). Without them, libp2p's relay
   server sends reservation acks with an empty addrs list and the
-  client transport errors with `NoAddressesInReservation`. The VPS
+  client transport errors with `NoAddressesInReservation`. These are
+  the daemon's own *explicit* transport multiaddrs (TCP and QUIC), NOT
+  the client shorthand — keep the `/tcp` / `/udp/quic-v1` here. The VPS
   systemd drop-in at
   `/etc/systemd/system/y7ke-bootstrap.service.d/external-addr.conf`
-  sets `Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/bootstrap1.y7v.lol/tcp/4101,/ip4/89.35.130.67/tcp/4101`.
+  sets `Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/bootstrap1.y7v.lol/tcp/4101,/ip4/89.35.130.67/tcp/4101,/dns4/bootstrap1.y7v.lol/udp/4101/quic-v1,/ip4/89.35.130.67/udp/4101/quic-v1`.
+  UDP/4101 must be open on the VPS firewall (`ufw allow 4101/udp`) for
+  QUIC to reach the bootstrap. The daemon (v0.1.6+) prints the
+  transport-agnostic client descriptor on startup
+  (`/dns4/bootstrap1.y7v.lol/4101/p2p/<id>`) — that's the line operators
+  paste into the client's Settings.
 - **`AppEvent::SettingsChanged`** fires when the user saves. The UI's
   events dispatcher subscribes and refreshes its store; the swarm
   task receives a `NetCommand::UpdateBootstraps` to re-sync its
@@ -144,8 +168,11 @@ cd ui && pnpm tsc --noEmit
 
 ## Roadmap pointers
 
-A1 + A2 + A4 shipped. Settings UI shipped. Remaining: **A3** (AutoNAT
-v2 — reachability detection), **A5** (DCUtR — upgrade Relayed →
-Direct), **A6** (QUIC). Then **B** (Double Ratchet + OS keyring +
-handshake replay nonce). **D2** (Playwright E2E) can run in parallel
-once types stabilise.
+A1 + A2 + A3 + A4 + A5 + A6 shipped (AutoNAT v2 reachability, DCUtR
+Relayed→Direct upgrade, QUIC dual-transport). Settings UI shipped;
+dial modes consolidated to two (LanOnly / Internet="Y7net"). Bootstrap
+descriptors are transport-agnostic shorthand. Connectivity debug pane
++ per-peer transport surfacing shipped. Remaining: live cross-network
+manual smoke (needs two real machines on different NATs), then **B**
+(Double Ratchet + OS keyring + handshake replay nonce). **D2**
+(Playwright E2E) can run in parallel once types stabilise.

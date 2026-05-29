@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.102] — 2026-05-29
+
+- docs: transport-agnostic bootstrap shorthand + QUIC/A5/A6 shipped state
+
 ## [0.1.101] — 2026-05-29
 
 - feat(net+app): transport-agnostic bootstrap + multi-addr QUIC racing + per-peer transport surfacing

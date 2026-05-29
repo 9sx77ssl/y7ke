@@ -54,24 +54,30 @@ Single `#[derive(NetworkBehaviour)]` (`Y7Behaviour`) aggregating:
 - `kad::Behaviour<MemoryStore>` (V2-A1) — `/y7ke/kad/1.0.0`, server mode, each client `start_providing`s its own key
 - `relay::client::Behaviour` (V2-A4) — circuit-relay-v2 client; the bootstrap (separate `y7ke-bootstrap` repo) carries `relay::Behaviour` as server
 
-Transports: TCP + Noise (XX) + Yamux, with `with_relay_client(...)` adding a separate transport for `/p2p-circuit` dials. No QUIC yet (V2-A6).
+Transports: TCP + Noise (XX) + Yamux **and** QUIC (`/quic-v1`), with `with_relay_client(...)` adding a separate transport for `/p2p-circuit` dials. Bootstraps are dialed on both TCP and QUIC simultaneously (QUIC preferred — it enables direct hole-punch); the live transport per connection is recorded as `Transport::{Tcp, Quic}`.
 
 ### Discovery + dialing
 
+`y7ke_core::settings::DialMode` has exactly two variants:
+`LanOnly` (shown in the GUI as "lan only") and `Internet` (shown as
+"Y7net", the default). A former third variant `P2p` was removed —
+it was a behavioural duplicate of `Internet` (identical dial chain;
+the DCUtR hole-punch upgrade runs automatically regardless of mode).
+Migration `0006_drop_p2p_dialmode.sql` rewrites legacy `"P2p"`
+settings rows to `Internet`.
+
 `crates/y7ke-app/src/app/contacts.rs::dial_with_discovery` runs four
-steps in order, each gated by the user's current `DialModes`:
+steps in order, gated by the user's current `DialMode`:
 
 1. **Swarm address book** — `net.dial(peer)` looks up the in-memory
    cache populated by mDNS + identify. Returns `Ok(true)` if a dial
    was actually issued, `Ok(false)` if the cache is empty (so the
-   chain continues). If `lan` mode is off and every known addr is
-   LAN-only, skips this step.
-2. **Cached addrs** — `peer_state.last_addrs_json` (filtered by
-   active modes), persisted across restarts.
+   chain continues). In `LanOnly` mode, if every known addr is
+   non-LAN this step is skipped.
+2. **Cached addrs** — `peer_state.last_addrs_json` (filtered by the
+   active mode), persisted across restarts.
 3. **Kad lookup** — `find_peer(y7_id)` issues `get_providers` with
-   a 10-s timeout; results filtered to drop non-circuit non-LAN
-   when `internet` is off, or drop circuit-bearing ones when
-   `relay` is off.
+   a 10-s timeout; in `LanOnly` mode non-LAN results are dropped.
 4. **Last-resort re-dial** — by now Kad may have populated the
    routing table.
 
@@ -81,6 +87,12 @@ steps in order, each gated by the user's current `DialModes`:
 `StatusDot` shows online/offline; a small `RELAY` text label in
 muted lilac (or `LAN`/`INTERNET`/`DIRECT` green) renders next to
 the peer's nickname.
+
+The underlying transport (`Transport::{Tcp, Quic}`, extracted from
+the connection's multiaddr) is tracked per connection alongside the
+`ConnectionKind` and surfaced as `transport: Option<Transport>` on
+both `AppEvent::PresenceChanged` and `ContactView`. The chat
+`ConnectionLabel` renders the pair, e.g. "DIRECT · QUIC".
 
 ### Bootstrap reservation + auto-reconnect (V2-A4)
 
@@ -161,13 +173,16 @@ See `crates/y7ke-storage/migrations/` — migrations land in order:
 | `0002_strip_session_key.sql` | Drop the legacy `sessions.shared_secret_enc` column once static-DH derivation replaced stored session keys. |
 | `0003_dedup_outgoing_requests.sql` | One-shot cleanup for installs that piled up duplicate outgoing requests during the V2-A4 dial-discovery bug. Keeps the earliest row per peer, drops the rest. |
 | `0004_settings.sql` | V2-A4 single-row `settings` table seeded with defaults; `(id INTEGER PRIMARY KEY CHECK (id = 1), payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL)`. |
+| `0005_dialmode_singular.sql` | Replace the 4-bool `dial_modes` object with a single `dial_mode` enum string; existing rows map to `Internet`. |
+| `0006_drop_p2p_dialmode.sql` | Remove the `P2p` dial mode (behavioural duplicate of `Internet`); rewrite any settings row still holding `"P2p"` to `"Internet"`. |
 
 ## Settings + dial modes (V2-A4)
 
-`y7ke_core::settings::{Settings, DialModes, BootstrapEntry,
+`y7ke_core::settings::{Settings, DialMode, BootstrapEntry,
 DEFAULT_RELAY_BOOTSTRAP}` define the wire types (re-exported, ts-rs
 generates the matching TS in `ui/src/lib/gen/`). Stored as JSON in
-the `settings` row.
+the `settings` row. `DialMode` is the two-variant `LanOnly` /
+`Internet` enum described under "Discovery + dialing".
 
 `y7ke_storage::dao::SettingsDao::{get, update}` round-trip a
 single-row entry. `y7ke_app::AppHandle` exposes
@@ -187,11 +202,27 @@ compile-time `DEFAULT_BOOTSTRAPS`. Whatever source contributes,
 `DEFAULT_RELAY_BOOTSTRAP` is always prepended (deduped) so a typo
 in user config can never strand the client.
 
-## What's deferred past V2-A4
+Bootstrap descriptors use a transport-AGNOSTIC shorthand —
+`/dns4/host/<port>/p2p/<id>` (no `/tcp` or `/udp`).
+`y7ke_core::expand_bootstrap` expands each shorthand into BOTH a
+`/.../tcp/<port>/p2p/<id>` and a `/.../udp/<port>/quic-v1/p2p/<id>`
+multiaddr and the swarm races them (QUIC preferred for hole-punch,
+TCP fallback). An already-explicit multiaddr (one naming `/tcp` or
+`/udp`) passes through unchanged. In the swarm, `bootstrap_peers`
+is therefore a `HashMap<PeerId, Vec<Multiaddr>>` (multiple addrs
+per bootstrap peer).
 
-- AutoNAT v2 (A3) — public-reachability detection + UI pill
-- DCUtR (A5) — upgrade `Relayed` → `Direct` once hole-punched
-- QUIC transport (A6)
+## Shipped since V2-A4
+
+- AutoNAT v2 (A3) — public-reachability detection (`NatReachability`)
+  + UI pill, driving the upgrade-from-relay loop.
+- DCUtR (A5) — upgrades `Relayed` → `Direct` once hole-punched;
+  runs automatically (no dedicated dial mode).
+- QUIC transport (A6) — `/quic-v1` added; bootstraps raced TCP+QUIC,
+  live transport tracked per connection (`Transport::{Tcp, Quic}`).
+
+## What's still deferred
+
 - OS keychain integration (currently DEK is file-only)
 - Argon2id passphrase vault for headless / no-libsecret hosts
 - Double Ratchet forward secrecy (B2)
