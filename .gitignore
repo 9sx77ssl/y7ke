@@ -28,6 +28,7 @@ src-tauri/gen/
 src-tauri/WixTools/
 
 # Local development databases & secrets (never commit)
+wallets.txt
 *.db
 *.db-journal
 *.db-wal

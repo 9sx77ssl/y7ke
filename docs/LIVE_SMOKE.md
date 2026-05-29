@@ -58,8 +58,8 @@ case — it's the hardest NAT class and the one mom will actually use.
 ## What to capture
 
 Attach both `~/y7ke-live.log` files and the two Connectivity-pane
-readings to the "Live manual smoke results" section of
-`docs/V2_GLOBAL_NETWORKING_PLAN.md`. Grep the logs for the progression:
+readings to the live-smoke tracking issue. Grep the logs for the
+progression:
 
 ```bash
 grep -E 'connection established|connection_kind|presence upgraded|dcutr:|autonat: verdict|relay: reservation' ~/y7ke-live.log

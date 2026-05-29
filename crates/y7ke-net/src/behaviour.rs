@@ -60,8 +60,7 @@ pub struct Y7Behaviour {
     /// AutoNAT v2 client — V2-A3. Asks peers (bootstrap nodes act as
     /// servers) to dial us back over a fresh outbound socket; positive
     /// responses confirm an external address as reachable. Drives the
-    /// upgrade-from-relay loop's "should we bother trying direct?"
-    /// decision — see `docs/V2_GLOBAL_NETWORKING_PLAN.md` §2 and §8.
+    /// upgrade-from-relay loop's "should we bother trying direct?" decision.
     pub autonat_client: autonat::v2::client::Behaviour<OsRng>,
 }
 
@@ -81,8 +80,7 @@ impl Y7Behaviour {
         // listen address the instant our relay reservation lands, instead of
         // waiting up to 60s for the next periodic identify push. Without this
         // DCUtR's CONNECT arrives with stale ObsAddrs and the hole punch
-        // dials the wrong endpoint — see libp2p/rust-libp2p#4007 and
-        // docs/V2_GLOBAL_NETWORKING_PLAN.md §8.
+        // dials the wrong endpoint — see libp2p/rust-libp2p#4007.
         let identify = identify::Behaviour::new(
             identify::Config::new(
                 IDENTIFY_PROTOCOL_VERSION.to_string(),

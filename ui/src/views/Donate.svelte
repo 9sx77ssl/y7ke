@@ -96,10 +96,7 @@
       </ul>
     </Card>
 
-    <p class="note">
-      no accounts, no fees, no middleman — addresses are static and copy
-      straight to your clipboard. thank you ♡
-    </p>
+    <p class="note">thx ♡</p>
   </div>
 </section>
 

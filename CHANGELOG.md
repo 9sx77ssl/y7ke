@@ -7,6 +7,41 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.6] — 2026-05-29
+
+Post-3.0 polish + repo cleanup (rolls up the 3.0.1–3.0.5 patch line).
+
+### Fixed
+
+- **Frameless window on Linux/webkit2gtk** opened at an inconsistent size
+  with a cramped first-paint layout. Root cause: the window was shown before
+  GTK had realized its allocation + devicePixelRatio, collapsing the
+  `height:100%` root chain. Now the window starts `visible:false` and is
+  revealed from Rust only after GTK has realized it; the root height is
+  viewport-anchored (`100dvh`). Transparency + rounded corners restored
+  (they were never the cause).
+
+### Added
+
+- **donate page** — a static, responsive view (crypto addresses only, no
+  backend) reached from the sidebar `donate >//<` footer link: a line-art
+  kitty, a slightly larger heading, and BTC / ETH / LTC / SOL rows each with
+  the full address + an SVG copy-to-clipboard button.
+- The sidebar shows a bare **contact count** next to the "contacts" head
+  (hidden at 0).
+
+### Removed
+
+- Repo cleanup: deleted the committed `wallets.txt` (personal address dump,
+  now in the donate page) and gitignored it; removed the stale V1-era
+  `docs/screenshots/`; removed the now-shipped `docs/V2_GLOBAL_NETWORKING_PLAN.md`
+  planning doc (recoverable from git history).
+
+### Docs
+
+- README "still pending in V2-A" → "NAT traversal (shipped in 3.0)" with an
+  honest field-status note; dangling references to the removed plan cleaned up.
+
 ## [3.0.5] — 2026-05-29
 
 - fix(ui): correct SOL donate address to valid base58

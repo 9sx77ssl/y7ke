@@ -107,12 +107,14 @@ and locally.
 - `PRAGMA secure_delete = ON` overwrites freed pages with zeros, so a wiped message or session can't be carved out of the database file.
 - Every envelope is signed with the sender's long-term Ed25519 key so receivers detect tampering and impersonation.
 
-## Internet mode (V2-A1 + A2 + A4)
+## Internet mode (V2 — Kademlia + relay + direct)
 
 V1 was LAN-only via mDNS. From v0.1.20 the client also speaks
 Kademlia DHT for peer lookup; from v0.1.43 it carries a libp2p
 **Circuit Relay v2** client so two peers behind NAT/CGNAT can talk
-through a public bootstrap. Discovery chain on `dial_with_discovery`,
+through a public bootstrap (now upgraded to direct via DCUtR — see
+[NAT traversal](#nat-traversal-v2--shipped-in-30) below). Discovery
+chain on `dial_with_discovery`,
 each step gated by the user's current dial modes:
 
 1. swarm address book (mDNS + identify cache)
@@ -214,14 +216,30 @@ the swarm task adds any new entries to its `bootstrap_peers` map
 and dials them. Existing connections to removed bootstraps stay
 open until they drop naturally.
 
-## Still pending in V2-A
+## NAT traversal (V2 — shipped in 3.0)
 
-NAT hole-punching (A5 DCUtR — upgrading the relayed connection to a
-direct TCP/UDP one once both peers reveal their observed addresses),
-AutoNAT v2 (A3 — telling the user "you're publicly reachable" vs
-"you need the relay"), and QUIC transport (A6 — UDP-only networks).
-With A4 shipped, two peers across arbitrary NATs already talk; A5
-makes the connection direct when the NATs allow it.
+Two peers across arbitrary NATs talk out of the box:
+
+- **Circuit Relay v2 (A4)** — fallback path; the bootstrap forwards
+  ciphertext frames only, never plaintext.
+- **DCUtR (A5)** — every relayed connection continuously tries to
+  hole-punch to a **direct** path ("relay is temporary"); on success it
+  upgrades Relayed → Direct.
+- **AutoNAT v2 (A3)** — reports whether you're publicly reachable and
+  gates the upgrade loop.
+- **QUIC (A6)** — bootstraps are dialed over QUIC **and** TCP at once
+  (QUIC preferred — it's the path that enables UDP hole-punch).
+
+The chat header and the **connectivity O.O** pane show exactly how each
+peer is reached (`DIRECT · QUIC` / `RELAY · TCP`), the NAT verdict, and
+the DCUtR success rate; the bug icon by the logo copies a full
+diagnostics snapshot.
+
+> **Field status (honest):** the relay / QUIC / direct paths are proven
+> on loopback and in a netns NAT simulation, and a QUIC relay
+> reservation against the production bootstrap is verified live. A
+> two-machine / two-ISP confirmation of a real cross-NAT QUIC
+> hole-punch is the one thing still pending.
 
 ## Documentation
 
