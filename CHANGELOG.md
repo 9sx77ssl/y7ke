@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.10] — 2026-05-29
+
+- fix(ui): tear down event listener on HMR + requests/sidebar self-heal poll
+
 ## [3.0.9] — 2026-05-29
 
 - fix(app+ui): contact-request flow — surface in requests, no chat until accept, no orphan/not-found

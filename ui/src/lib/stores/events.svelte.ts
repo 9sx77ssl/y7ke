@@ -160,3 +160,14 @@ function dispatch(ev: AppEvent): void {
 export function clearBackgroundError(): void {
   state.lastBackgroundError = null;
 }
+
+// Dev only: Vite hot-reloads this module on every save. Without teardown,
+// each reload re-registers a second Tauri listener while the OLD one keeps
+// firing into the now-dead store instance — which is why, under
+// `cargo tauri dev`, an open chat sometimes doesn't show inbound messages
+// until you re-enter it (the event landed on a stale store), and why the
+// same event was seen 6×. Disposing on hot-swap keeps exactly one live
+// listener. No effect in the production bundle (import.meta.hot is undefined).
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => stopEventDispatch());
+}

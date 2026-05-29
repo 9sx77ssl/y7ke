@@ -103,6 +103,19 @@
     return () => clearTimeout(id);
   });
 
+  // Self-heal poll: the 256-slot backend broadcast can drop a
+  // request_received / presence event under churn (and dev HMR can briefly
+  // orphan the listener), which would leave the requests badge + sidebar
+  // stale until the user navigates. A slow 5s re-pull forces convergence
+  // without hammering IPC. Torn down on unmount.
+  $effect(() => {
+    const id = setInterval(() => {
+      void refreshRequests();
+      void refreshContacts();
+    }, 5000);
+    return () => clearInterval(id);
+  });
+
   function isOpen(y7Id: string): boolean {
     return router.pane.kind === "chat" && router.pane.peerY7Id === y7Id;
   }
