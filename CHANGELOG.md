@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.5] — 2026-05-29
+
+- fix(ui): correct SOL donate address to valid base58
+
 ## [3.0.4] — 2026-05-29
 
 - feat(ui): static donate page (crypto wallets) opened from the footer link

@@ -12,13 +12,12 @@
     address: string;
   }
 
-  // Addresses are static. NOTE: the SOL entry is in 0x (Ethereum) format —
-  // kept as provided; verify before relying on it (Solana is base58).
+  // Addresses are static.
   const WALLETS: Wallet[] = [
     { ticker: "BTC", name: "bitcoin", address: "bc1qfmnvkt2aj9k8jnaf5s7snr3gl2mmdz9m6ug2du" },
     { ticker: "ETH", name: "ethereum", address: "0x1A13BF0847cbb2c0699ef61F10Bc1beb995ac492" },
     { ticker: "LTC", name: "litecoin", address: "Lh3PQZTcSxbDxPVTN6AgAQx3xYWwsbcWmm" },
-    { ticker: "SOL", name: "solana", address: "0x1A13BF0847cbb2c0699ef61F10Bc1beb995ac492" },
+    { ticker: "SOL", name: "solana", address: "8fzQ6a3xpvZGAUWxphSdLb53NgGMn3e2nSqcwG1K1cDT" },
   ];
 
   async function copyAddr(w: Wallet): Promise<void> {
