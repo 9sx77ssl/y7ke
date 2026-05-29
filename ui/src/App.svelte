@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
   import { identity, loadIdentity } from "./lib/stores/identity.svelte";
@@ -21,7 +22,16 @@
     void win.startResizeDragging(dir);
   }
 
-  $effect(() => {
+  // Boot exactly once. This MUST NOT be an $effect: loadIdentity() writes the
+  // reactive `loading` flag in its finally block, and the old $effect read that
+  // same flag transitively — so the effect re-fired on every identity load,
+  // running its cleanup (stopEventDispatch → unlisten) and re-registering the
+  // Tauri listener in a tight async loop. During each listener-down window an
+  // inbound message_received was dropped at the Tauri layer (never reached the
+  // dispatcher), which is why live messages only appeared after re-entering a
+  // chat (disk reload) and why "Couldn't find callback id" spammed the console.
+  // onMount runs once and never re-tracks.
+  onMount(() => {
     void startEventDispatch();
     void loadIdentity();
     // Tear down the singleton Tauri listener if App ever unmounts (it's the

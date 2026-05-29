@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.15] — 2026-05-29
+
+- fix(ui): stop boot $effect from flapping the Tauri listener (dropped live messages)
+
 ## [3.0.14] — 2026-05-29
 
 - fix(delete): durable ChatDeleted propagation + square frameless corners

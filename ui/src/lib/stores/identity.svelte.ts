@@ -37,8 +37,15 @@ export const identity = {
   },
 };
 
+// Non-reactive in-flight guard. Must NOT read the reactive `state.loading`:
+// loadIdentity is sometimes called from a reactive context, and reading a
+// tracked flag here (while the finally block writes it) is exactly what turned
+// the App boot effect into a listener-flapping loop. The module-level boolean
+// dedups concurrent calls without subscribing any caller to `loading`.
+let inFlight = false;
 export async function loadIdentity(): Promise<void> {
-  if (state.loading) return;
+  if (inFlight) return;
+  inFlight = true;
   state.loading = true;
   state.error = null;
   try {
@@ -48,6 +55,7 @@ export async function loadIdentity(): Promise<void> {
     state.error = err instanceof Error ? err.message : String(err);
   } finally {
     state.loading = false;
+    inFlight = false;
   }
 }
 
