@@ -12,6 +12,7 @@
   import AddContact from "./AddContact.svelte";
   import Chat from "./Chat.svelte";
   import Connectivity from "./Connectivity.svelte";
+  import Donate from "./Donate.svelte";
   import EmptyChat from "./EmptyChat.svelte";
   import Requests from "./Requests.svelte";
   import Settings from "./Settings.svelte";
@@ -46,6 +47,8 @@
       <Settings />
     {:else if router.pane.kind === "connectivity"}
       <Connectivity />
+    {:else if router.pane.kind === "donate"}
+      <Donate />
     {/if}
   </section>
 </div>

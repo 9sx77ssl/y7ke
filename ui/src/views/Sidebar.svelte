@@ -17,6 +17,7 @@
     openRequests,
     openSettings,
     openConnectivity,
+    openDonate,
     router,
   } from "../lib/stores/route.svelte";
   import { truncateY7Id } from "../lib/format";
@@ -202,14 +203,17 @@
   </ul>
 
   <div class="footer">
-    <!-- Placeholder link — swap href for the in-app donate route once it exists. -->
     <a
       class="donate"
-      href="#"
+      class:active={router.pane.kind === "donate"}
+      href="#donate"
       title="support y7ke"
       onmouseenter={() => (donateHover = true)}
       onmouseleave={() => (donateHover = false)}
-      onclick={(e) => e.preventDefault()}
+      onclick={(e) => {
+        e.preventDefault();
+        openDonate();
+      }}
     >
       donate {donateHover ? ">///<" : ">//<"}
     </a>
@@ -316,5 +320,8 @@
   .donate:focus-visible {
     color: var(--y7-text-secondary);
     outline: none;
+  }
+  .donate.active {
+    color: var(--y7-text-primary);
   }
 </style>

@@ -11,7 +11,8 @@ export type MainPane =
   | { kind: "add_contact" }
   | { kind: "requests" }
   | { kind: "settings" }
-  | { kind: "connectivity" };
+  | { kind: "connectivity" }
+  | { kind: "donate" };
 
 const route = $state<{ pane: MainPane }>({ pane: { kind: "empty" } });
 
@@ -63,4 +64,10 @@ export function openConnectivity(): void {
   logger.debug("→ connectivity");
   closeConversation();
   route.pane = { kind: "connectivity" };
+}
+
+export function openDonate(): void {
+  logger.debug("→ donate");
+  closeConversation();
+  route.pane = { kind: "donate" };
 }
