@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.17] — 2026-05-29
+
+- docs: refresh CLAUDE.md — fix release-build command + 3.x architectural pins
+
 ## [3.0.16] — 2026-05-29
 
 - fix(presence): online status now re-establishes after deleting and re-adding a contact over a still-live connection — the socket is force-closed on delete so a re-add re-dials fresh, plus a presence-ticker backstop heals any map-vs-socket desync. No restart needed.

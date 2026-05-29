@@ -15,7 +15,7 @@ messaging over libp2p; local-first SQLite; no accounts. See
 
 ```
 crates/y7ke-core       # types, errors, crypto primitives, AppEvent, status enums
-crates/y7ke-storage    # sqlx-sqlite + master DEK + DAOs (9 tables incl. settings)
+crates/y7ke-storage    # sqlx-sqlite + master DEK + DAOs (10 tables; settings + pending_deletes)
 crates/y7ke-net        # libp2p swarm + 3 request-response protocols + Kad + relay-client
 crates/y7ke-app        # composition root — owns Db + NetHandle, runs event_loop
 src-tauri              # Tauri 2 shell, command surface, event channel
@@ -69,10 +69,14 @@ docs/                  # ARCHITECTURE, ROADMAP, LIVE_SMOKE (cross-NAT runbook)
 # dev (Tauri + Vite together)
 cargo tauri dev
 
-# release binary (no bundle, no tauri-cli needed)
-pnpm --dir ui build && cargo build --release -p y7ke-tauri
+# release binary WITH embedded UI — MUST go through the Tauri CLI.
+# Plain `cargo build --release -p y7ke-tauri` does NOT embed the frontend:
+# the resulting binary loads the dev URL and dies with "Could not connect to
+# localhost". CI uses `cargo tauri build`; do the same locally, or grab the
+# CI-built AppImage from the GitHub release.
+cargo tauri build --bundles appimage   # → target/release/y7ke (+ AppImage)
 
-# run two local peers
+# run two local peers (after a `cargo tauri build`)
 Y7KE_DATA_DIR=/tmp/y7ke-alice ./target/release/y7ke &
 Y7KE_DATA_DIR=/tmp/y7ke-bob   ./target/release/y7ke &
 
@@ -96,7 +100,24 @@ cd ui && pnpm tsc --noEmit
   `messaging::ControlPayload` and a branch in `event_loop::handle_control`.
 - **MessageStatus** serializes as `i64` (via `serde_repr`) so the UI's
   `MSG_SENDING / MSG_SENT / ...` constants match. Don't switch back to
-  string enum.
+  string enum. Only two terminal states are written in production:
+  `Delivered(2)` (peer's RR handler acked) and `Synced(3)`; `Sent(1)` and
+  `Failed(4)` are dead — don't start writing them (the UI renders 2 and 3
+  identically, so promoting Delivered→Synced is seamless).
+- **Reliable delivery contract.** A send that isn't live-acked is enqueued
+  in `sync_queue` (status stays `Sending`) and re-driven by
+  `event_loop::drain_queue_for_peer` on every reconnect (`PeerDiscovered` /
+  `ConnectionEstablished` / `ConnectionUpgraded`, `respect_schedule=false` =
+  flush all) and by the presence ticker (`respect_schedule=true` = honour
+  `next_retry_at`). The DCUtR relay→direct upgrade folds the relayed
+  connection, killing any RR request pinned to it — so `ConnectionUpgraded`
+  MUST drain (it doesn't re-emit otherwise). `SEND_TIMEOUT` (app.rs) MUST
+  stay ABOVE the request-response `request_timeout` (15s, behaviour.rs) —
+  a shorter cap abandons a still-live request and spuriously re-queues. As a
+  durable backstop, `kick_sync_for_peer` promotes our outbound rows the peer
+  reports as held (`their.highest_inbound_msg_id`) to `Synced` via
+  `messages().promote_outbound_synced`, so a delivered-but-ack-lost message
+  can't stay stuck on the sending clock.
 - **`AppState`** (Tauri side) wraps an `Option<Arc<AppHandle>>` so
   commands can be invoked before boot completes; `.get().await` blocks
   until the slot is filled.
@@ -129,7 +150,28 @@ cd ui && pnpm tsc --noEmit
   `ContactView` carry `transport: Option<Transport>`; `refresh_presence`
   returns `(ConnectionKind, Option<Transport>)`; the chat
   `ConnectionLabel` renders e.g. "DIRECT · QUIC". When you add a presence
-  emit site, thread the transport through — don't drop it.
+  emit site, thread the transport through — don't drop it. `Internet` and
+  `Direct` are BOTH direct (no relay): `Internet` = direct dial succeeded
+  outright; `Direct` = relay→DCUtR hole-punch upgrade. Neither is a relay
+  path.
+- **Presence is sourced ONLY from `inner.connections`**, written ONLY by the
+  `ConnectionEstablished` / `ConnectionUpgraded` handlers; `refresh_presence`
+  reads nothing else. libp2p will NOT re-emit `ConnectionEstablished` for an
+  already-open connection, so anything that clears `inner.connections` while
+  the socket lives (e.g. `wipe_conversation`) would strand presence at
+  Offline forever. Two guards keep them in sync: (1) `delete_contact` calls
+  `NetHandle::disconnect_peer` (→ `NetCommand::DisconnectPeer` →
+  `swarm.disconnect_peer_id`, closes relay+direct) AFTER `flush_pending_delete`
+  delivers `ChatDeleted`, so a re-add re-dials fresh; (2) the presence
+  ticker's Offline arm drops a stale socket (`check_live==true` but map empty)
+  so the next dial re-establishes — never synthesize a fake `ConnEntry` (no
+  `ConnectionClosed` could remove it → false-online).
+- **Durable chat-delete.** `ChatDeleted` must reach the peer even if they're
+  offline. `delete_contact` seals it BEFORE `wipe_conversation` (the wipe
+  destroys the session) and stashes the sealed envelope in the
+  `pending_deletes` table (migration 0007); `flush_pending_delete` retries it
+  on every reconnect until acked. `Db::wipe_peer` MUST NOT clear
+  `pending_deletes` — that's what lets the deletion survive the local wipe.
 - **`pnpm-workspace.yaml`** in `ui/` carries `onlyBuiltDependencies:
   - esbuild`. pnpm 10 ignores the equivalent `pnpm` field in
   package.json; the workspace yaml is the only path that lets a
@@ -147,6 +189,23 @@ cd ui && pnpm tsc --noEmit
   layout, a different window size each launch). Don't drop `visible:false`
   or the Rust show. Rust-side `show()` needs no ACL capability; a JS
   `show()` would be rejected (`core:window:default` lacks `allow-show`).
+- **App boot runs in `onMount`, never `$effect`.** `App.svelte` starts the
+  single Tauri event listener (`startEventDispatch`) and hydrates the
+  identity + settings stores once on mount. It MUST be `onMount`: an
+  `$effect` that calls a fn which reads-and-writes a tracked `$state` flag
+  (e.g. `identity.loading`) across an `await` self-retriggers — the async gap
+  dodges Svelte's depth guard — and re-runs its cleanup
+  (`stopEventDispatch` → `unlisten`) in a loop, so inbound events emitted
+  during a listener-down window are dropped at the Tauri layer (looks like
+  "messages only render after re-entering the chat" + a `Couldn't find
+  callback id` storm — on RELEASE too, not just dev). Dedup guards for
+  boot-time loaders must be a non-reactive module boolean (`inFlight`), NOT a
+  tracked `$state` read.
+- **Dev full-reload.** `ui/vite.config.ts` forces a full webview reload on
+  every dev file save (kills the HMR singleton-store split that otherwise
+  splits `$state` across module generations). Consequence: a short burst of
+  `Couldn't find callback id` right after a save is EXPECTED and benign in
+  dev only (`import.meta.hot` is undefined in the release bundle).
 - **Versioning + release are hook- and push-driven.** `scripts/hooks/pre-commit`
   bumps the patch version across `Cargo.toml`, `src-tauri/tauri.conf.json`,
   and `ui/package.json`; `post-commit` prepends a `CHANGELOG.md` entry with
@@ -192,7 +251,10 @@ A1 + A2 + A3 + A4 + A5 + A6 shipped (AutoNAT v2 reachability, DCUtR
 Relayed→Direct upgrade, QUIC dual-transport). Settings UI shipped;
 dial modes consolidated to two (LanOnly / Internet="Y7net"). Bootstrap
 descriptors are transport-agnostic shorthand. Connectivity debug pane
-+ per-peer transport surfacing shipped. Remaining: live cross-network
-manual smoke (needs two real machines on different NATs), then **B**
-(Double Ratchet + OS keyring + handshake replay nonce). **D2**
-(Playwright E2E) can run in parallel once types stabilise.
++ per-peer transport surfacing shipped. 3.x hardening shipped (3.0.13–
+3.0.16): reliable message delivery, durable chat-delete propagation,
+live-render correctness (boot-effect listener-flap fix), and presence
+re-establish on delete+re-add. Remaining: live cross-network manual smoke
+(needs two real machines on different NATs), then **B** (Double Ratchet +
+OS keyring + handshake replay nonce). **D2** (Playwright E2E) can run in
+parallel once types stabilise.
