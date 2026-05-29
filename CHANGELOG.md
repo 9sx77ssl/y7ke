@@ -7,6 +7,82 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.0] — 2026-05-29
+
+**Y7KE 3.0 — the "global networking" milestone.** The app graduates from a
+LAN/loopback-proven prototype into a direct-first encrypted messenger built
+to reach peers across the open internet: QUIC + TCP transports, circuit-relay
+fallback, and continuous DCUtR hole-punch upgrades — behind a clean
+monochrome UI with full, honest connection visibility. The granular per-commit
+history for this release is recorded in the `0.1.x` entries below.
+
+### Added — networking (V2 A1–A6)
+
+- **QUIC + TCP dual transport.** Every peer dials both and races them; QUIC
+  wins on UDP-open networks (the path that enables direct hole-punch), TCP is
+  the fallback.
+- **Circuit Relay v2 fallback.** Peers behind NAT/CGNAT reserve a slot on a
+  bootstrap and forward end-to-end-encrypted frames through it; the relay
+  never sees plaintext.
+- **DCUtR hole-punching** upgrades a Relayed connection to Direct, with a
+  continuous upgrade-from-relay loop ("relay is temporary") that keeps
+  retrying on observed-address / NAT-verdict changes with bounded backoff.
+- **AutoNAT v2** reachability detection (Public / Private / Unknown) drives
+  the upgrade loop and the UI verdict.
+- **Transport-agnostic bootstrap shorthand** `/dns4/host/PORT/p2p/<id>` (no
+  `/tcp` or `/udp`) — the client expands it to both transports. The bootstrap
+  daemon (v0.1.6) prints the exact descriptor to paste into a client.
+- Reconnect-storm protection: idempotent swarm dials, per-peer reconnect
+  backoff + jitter, and bounded concurrent Kad lookups.
+
+### Added — connection visibility & diagnostics
+
+- **Connectivity pane**: per-peer kind + transport + relay path, NAT verdict,
+  DCUtR success rate, and per-bootstrap reachability.
+- Chat header shows **how you're connected** — e.g. "DIRECT · QUIC" /
+  "RELAY · TCP".
+- **Copy-diagnostics** export (bug icon beside the logo): version, dial mode,
+  NAT detail (tested addr + probe server + consecutive failures), DCUtR
+  failure reasons, per-protocol rate-limit drops, active connections,
+  bootstrap RTT, and the UI log buffer.
+
+### Changed
+
+- Dial modes consolidated to **two**: "lan only" and "Y7net" (the former
+  duplicate `P2p` mode was removed; legacy rows migrate to Y7net).
+- Settings **live-apply**: dial-mode / bootstrap changes take effect within
+  ~1 s, no restart.
+
+### Fixed — reliability & security
+
+- Sync drains correctly over a relayed circuit; per-peer in-memory growth is
+  bounded; `ContactStatus::Blocked` is enforced on both the inbound and sync
+  paths (fail-closed); presence recomputation never strands a live peer
+  Offline; stale relay/circuit addresses are swept from the address book.
+
+### Fixed — UI/UX
+
+- Layout stability (always-static sidebar, capped modal/toast widths,
+  frameless-window resize); reactive correctness (settings re-hydrate,
+  no presence desync, no toast floods); accessibility (roving radio pills,
+  modal focus/escape, viewport-clamped context menu); monochrome palette
+  discipline (tokenised pill borders).
+
+### CI/CD
+
+- Release pipeline gated on `fmt + clippy -D warnings + tests + tsc + build`
+  before any bundle is published; Linux AppImage (strict) + Windows NSIS
+  (best-effort) bundles; release notes drawn from this changelog.
+
+### Known limitations
+
+- **Live cross-NAT QUIC hole-punch is not yet field-confirmed.** Direct
+  upgrade is proven on loopback and in a netns NAT simulation, and QUIC
+  reservation against the production bootstrap is verified live — but a
+  two-machine, two-ISP smoke test is still pending.
+- `ContactStatus::Blocked` is reachable (by rejecting a request) but has no
+  management UI yet to view or undo blocks.
+
 ## [0.1.103] — 2026-05-29
 
 - fix(ui+app+ci): post-3.0 audit hardening — reactivity, diagnostics, release gate

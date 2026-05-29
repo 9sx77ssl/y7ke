@@ -185,6 +185,13 @@ V2 ships when:
   Linux with `libsecret` available.
 - A Playwright suite covers the full V1 acceptance scenario.
 
+**Known gaps carried into 3.0 (polish, not blockers):**
+- Live cross-NAT QUIC hole-punch is proven on loopback + a netns NAT sim and
+  the QUIC relay reservation is verified against the production bootstrap, but
+  a two-machine / two-ISP field confirmation is still pending.
+- A block/unblock management UI: `ContactStatus::Blocked` is reachable (by
+  rejecting a request) but cannot yet be viewed or undone from the app.
+
 ## V3 — Groups, files, anonymous routing ◯
 
 - Group conversations (pairwise sessions first, then a native group
