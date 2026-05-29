@@ -339,6 +339,15 @@ impl NetHandle {
             .map_err(|e| AppError::network(format!("check_live response dropped: {e}")))?
     }
 
+    /// Force-close every connection to `y7_id`. Fire-and-forget: the next
+    /// dial yields a fresh `ConnectionEstablished` that repopulates presence.
+    pub async fn disconnect_peer(&self, y7_id: Y7Id) -> Result<(), AppError> {
+        self.cmd_tx
+            .send(NetCommand::DisconnectPeer { y7_id })
+            .await
+            .map_err(|e| AppError::network(format!("command channel closed: {e}")))
+    }
+
     /// Request graceful shutdown. The swarm task will drain in-flight
     /// requests and exit. Subsequent commands return
     /// `AppError::Network("command channel closed")`.
@@ -420,6 +429,12 @@ pub enum NetCommand {
         y7_id: Y7Id,
         response_tx: oneshot::Sender<Result<bool, AppError>>,
     },
+    /// Force-close ALL libp2p connections to the peer derived from `y7_id`.
+    /// Used on chat delete (drop the stale socket so both ends re-dial fresh)
+    /// and by the presence ticker to clear a map-vs-socket desync — libp2p
+    /// won't re-emit `ConnectionEstablished` for an already-open connection,
+    /// so the only way to repopulate presence is to drop it and dial again.
+    DisconnectPeer { y7_id: Y7Id },
     /// Switch the live `DialMode`. Triggers immediate side-effects:
     /// `LanOnly` drops `/p2p-circuit` listeners + disconnects bootstraps;
     /// `Internet` re-enable bootstrap reconnect and relay reservations.

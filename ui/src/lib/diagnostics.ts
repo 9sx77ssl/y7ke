@@ -10,17 +10,24 @@ import {
   getDcutrStats,
   getDiagnosticsDetail,
   getNatStatus,
+  getSettings,
   listActiveConnections,
   listBootstraps,
 } from "./bridge";
 import type { ConnectionView } from "./gen/ConnectionView";
-import { settingsStore } from "./stores/settings.svelte";
 import { collectFrontendLog } from "./log";
 
 function transportLabel(c: ConnectionView): string {
   if (c.kind === "relayed") return "relayed";
   const t = c.transport ? c.transport.toLowerCase() : "?";
   return `${c.kind} / ${t}`;
+}
+
+/** Friendly dial-mode label (matches the Connectivity pane wording). */
+function dialModeLabel(m: string | undefined): string {
+  if (m === "LanOnly") return "lan only";
+  if (m === "Internet") return "Y7net";
+  return "—";
 }
 
 /** Build the full diagnostics text blob. */
@@ -32,12 +39,13 @@ export async function buildDiagnostics(): Promise<string> {
     /* version is best-effort */
   }
 
-  const [nat, dcutr, conns, boots, detail] = await Promise.all([
+  const [nat, dcutr, conns, boots, detail, settings] = await Promise.all([
     getNatStatus(),
     getDcutrStats(),
     listActiveConnections(),
     listBootstraps(),
     getDiagnosticsDetail(),
+    getSettings(),
   ]);
 
   const att = Number(dcutr.attempts);
@@ -52,7 +60,7 @@ export async function buildDiagnostics(): Promise<string> {
   const L: string[] = [];
   L.push(`y7ke diagnostics — ${new Date().toISOString()}`);
   L.push(`version:        ${version}`);
-  L.push(`dial mode:      ${settingsStore.settings?.dial_mode ?? "unknown"}`);
+  L.push(`dial mode:      ${dialModeLabel(settings.dial_mode)}`);
   L.push(`nat status:     ${nat}`);
   const nd = detail.nat_detail;
   if (nd.last_tested_addr || nd.consecutive_failures > 0) {

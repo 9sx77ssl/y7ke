@@ -4,6 +4,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { identity, loadIdentity } from "./lib/stores/identity.svelte";
   import { startEventDispatch, stopEventDispatch } from "./lib/stores/events.svelte";
+  import { refreshSettings } from "./lib/stores/settings.svelte";
   import IdentitySetup from "./views/IdentitySetup.svelte";
   import MainShell from "./views/MainShell.svelte";
   import Titlebar from "./lib/components/Titlebar.svelte";
@@ -34,6 +35,11 @@
   onMount(() => {
     void startEventDispatch();
     void loadIdentity();
+    // Hydrate settings at boot so the Connectivity pane + diagnostics export
+    // always show the real dial mode ("Y7net" / "lan only") instead of "—" /
+    // "unknown". The store is otherwise loaded lazily only when the Settings
+    // page is opened, so a peer who never visited Settings showed a blank.
+    void refreshSettings();
     // Tear down the singleton Tauri listener if App ever unmounts (it's the
     // root today, so this is hygiene rather than a live leak).
     return () => stopEventDispatch();

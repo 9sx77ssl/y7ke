@@ -7413,7 +7413,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-app"
-version = "3.0.14"
+version = "3.0.15"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7437,7 +7437,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-core"
-version = "3.0.14"
+version = "3.0.15"
 dependencies = [
  "blake3",
  "bs58",
@@ -7461,7 +7461,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-net"
-version = "3.0.14"
+version = "3.0.15"
 dependencies = [
  "async-trait",
  "bincode",
@@ -7480,7 +7480,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-storage"
-version = "3.0.14"
+version = "3.0.15"
 dependencies = [
  "async-trait",
  "directories",
@@ -7498,7 +7498,7 @@ dependencies = [
 
 [[package]]
 name = "y7ke-tauri"
-version = "3.0.14"
+version = "3.0.15"
 dependencies = [
  "serde",
  "serde_json",

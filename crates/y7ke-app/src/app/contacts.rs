@@ -353,6 +353,12 @@ impl AppHandle {
             let inner = std::sync::Arc::clone(&self.inner);
             tokio::spawn(async move {
                 let _ = crate::event_loop::flush_pending_delete(&inner, &peer, peer_id).await;
+                // Drop the socket AFTER the ChatDeleted send so a re-add
+                // re-dials fresh (libp2p won't re-emit ConnectionEstablished
+                // for a surviving connection → presence would stay Offline).
+                // The peer sees ConnectionClosed too, so both ends reset. Flush
+                // failure is non-fatal — pending_deletes retries on reconnect.
+                let _ = inner.net.disconnect_peer(peer).await;
             });
         }
         Ok(())

@@ -510,6 +510,19 @@ async fn run_presence_ticker(
                         }
                     };
                     if should_dial {
+                        // Map-vs-socket desync floor: if libp2p still holds a
+                        // live connection while our presence map says Offline
+                        // (delete+re-add over a surviving socket, or a missed
+                        // ConnectionEstablished), drop the stale socket so the
+                        // redial below produces a FRESH ConnectionEstablished
+                        // with a real ConnectionId — repopulating presence
+                        // without synthesizing a ghost entry that no
+                        // ConnectionClosed could ever remove. Backoff-gated
+                        // (inside should_dial) so it can't churn a live socket.
+                        if let Ok(true) = inner.net.check_live(c.y7_id).await {
+                            tracing::debug!(y7_id = %c.y7_id, "presence ticker: live socket but Offline map — dropping stale socket to re-establish");
+                            let _ = inner.net.disconnect_peer(c.y7_id).await;
+                        }
                         let handle = AppHandle {
                             inner: Arc::clone(&inner),
                             event_tx: event_tx.clone(),

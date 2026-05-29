@@ -650,6 +650,16 @@ fn handle_command(
             let _ = response_tx.send(result);
         }
 
+        NetCommand::DisconnectPeer { y7_id } => {
+            // Closes ALL connections to the PeerId (relay + direct). On delete
+            // this drops the stale socket so a re-add re-dials fresh; the peer
+            // observes ConnectionClosed too, so both ends repopulate presence
+            // from the next ConnectionEstablished.
+            if let Ok(peer) = peer_id_from_y7(&y7_id) {
+                let _ = swarm.disconnect_peer_id(peer);
+            }
+        }
+
         NetCommand::Shutdown => {
             // Handled by the caller of `handle_command`. Should never
             // arrive here in practice; if it does, we just no-op.
