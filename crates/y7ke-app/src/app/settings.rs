@@ -73,11 +73,25 @@ impl AppHandle {
     /// connection_meta (transport + via_host), and the peer's `y7:`
     /// URI. Cheap RwLock read, no allocations beyond the result Vec.
     pub async fn list_active_connections(&self) -> Vec<y7ke_core::ConnectionView> {
+        // Only surface connections to actual CONTACTS. The swarm also holds
+        // transient Kad/DHT-routing connections to non-contact peers (and
+        // strangers who dialed us); those would otherwise sit in this pane
+        // forever, which is confusing — "who am I reaching" means my contacts.
+        let contact_ids: std::collections::HashSet<y7ke_core::Y7Id> = self
+            .inner
+            .db
+            .contacts()
+            .list()
+            .await
+            .map(|rows| rows.into_iter().map(|c| c.y7_id).collect())
+            .unwrap_or_default();
         let presence = self.inner.presence.read().await;
         let meta = self.inner.connection_meta.read().await;
         presence
             .iter()
-            .filter(|(_, kind)| !matches!(**kind, y7ke_core::ConnectionKind::Offline))
+            .filter(|(y7, kind)| {
+                !matches!(**kind, y7ke_core::ConnectionKind::Offline) && contact_ids.contains(*y7)
+            })
             .map(|(y7, kind)| {
                 let m = meta.get(y7).cloned().unwrap_or_default();
                 y7ke_core::ConnectionView {

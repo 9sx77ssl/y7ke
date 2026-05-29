@@ -51,20 +51,24 @@ impl RateLimiter {
     pub fn default_limits() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            // Generous per-peer ceilings: comfortably absorb fast human
+            // typing + reconnect-driven re-handshakes without ever dropping a
+            // legit message, while still bounding a single peer (these are
+            // per-PeerId, so one peer can't flood beyond its own bucket).
             handshake_limit: BucketLimit {
-                max_events: 30,
+                max_events: 60,
                 window: Duration::from_secs(60),
             },
             msg_limit: BucketLimit {
-                max_events: 600,
+                max_events: 1200,
                 window: Duration::from_secs(60),
             },
             // One reconcile is up to 1 Header + SYNC_MAX_PULL_PAGES (64)
-            // Pull + 1 Ack ≈ 66 inbound sync RPCs in quick succession, so
-            // 30 truncated large backlogs. 128 fits a full reconcile with
-            // headroom while still bounding abuse (cf. msg 600).
+            // Pull + 1 Ack ≈ 66 inbound sync RPCs in quick succession. 256
+            // fits several full reconciles with headroom while still bounding
+            // abuse (cf. msg 1200).
             sync_limit: BucketLimit {
-                max_events: 128,
+                max_events: 256,
                 window: Duration::from_secs(60),
             },
         }

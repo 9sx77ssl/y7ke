@@ -357,12 +357,16 @@ async fn handle_handshake(
     let greeting = request.greeting.clone();
 
     // H1 backstop: if we already have a session for this peer, refuse to
-    // overwrite it. Send `accept = false`; the initiator's
-    // `finalize_initiator` rejects and keeps its own session intact.
+    // overwrite it (send accept=false; the initiator keeps its own session).
+    // But STILL surface the contact request — a re-handshake from a peer we
+    // already share a session with (common right after the QUIC connect)
+    // must not silently swallow the request, or the recipient's "requests"
+    // view stays empty forever and the contact is stuck pending.
     if inner.db.sessions().get(&claimed_id).await?.is_some() {
-        tracing::debug!(%claimed_id, "handshake from peer with existing session — rejecting to preserve session keys");
+        tracing::debug!(%claimed_id, "handshake from peer with existing session — preserving session keys, still surfacing request");
         let reject = handshake::reject_response(&inner.me, &inner.my_pubkey, &request);
         inner.net.respond_handshake_take(channel, reject).await?;
+        ensure_incoming_request(inner, event_tx, claimed_id, greeting.clone()).await?;
         return Ok(());
     }
 
@@ -371,11 +375,36 @@ async fn handle_handshake(
     debug_assert_eq!(initiator_y7, claimed_id, "respond() must derive same Y7Id");
 
     inner.db.sessions().upsert(&initiator_y7).await?;
+    inner.net.respond_handshake_take(channel, resp).await?;
+    // Surface the request: PendingIn contact + Incoming request row +
+    // RequestReceived, all under one consistent rule (see the helper).
+    ensure_incoming_request(inner, event_tx, initiator_y7, greeting).await?;
+    Ok(())
+}
 
-    // Upsert pending-in contact (only if new).
+/// Ensure the recipient side of an inbound contact request is fully
+/// surfaced: a `PendingIn` contact, a pending Incoming request row, and a
+/// `RequestReceived` event — so the request ALWAYS reaches the "requests"
+/// view. Called from both the normal handshake path and the session-exists
+/// backstop. Single consistent rule (no separately-guarded contact / row /
+/// event, which previously let a request be created without the event, or
+/// the event suppressed while the contact appeared). Idempotent: a replayed
+/// handshake adds no duplicate row but still re-emits the event (just a
+/// cheap refresh on the recipient); never downgrades an Accepted contact.
+async fn ensure_incoming_request(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    initiator_y7: Y7Id,
+    greeting: Option<String>,
+) -> Result<()> {
     let existing = inner.db.contacts().get(&initiator_y7).await?;
-    let was_new_contact = existing.is_none();
-    if was_new_contact {
+    if matches!(
+        existing.as_ref().map(|c| c.status),
+        Some(ContactStatus::Accepted)
+    ) {
+        return Ok(()); // re-handshake from an accepted peer — no-op
+    }
+    if existing.is_none() {
         inner
             .db
             .contacts()
@@ -387,9 +416,7 @@ async fn handle_handshake(
             })
             .await?;
     }
-
-    // H3: only insert a request row if no pending one already exists for
-    // this peer. Otherwise a replayed HandshakeReq would spam the UI.
+    // H3 replay guard: one pending Incoming row per peer.
     let already_pending = inner
         .db
         .requests()
@@ -397,7 +424,6 @@ async fn handle_handshake(
         .await?
         .into_iter()
         .any(|r| r.peer_y7_id == initiator_y7);
-
     if !already_pending {
         inner
             .db
@@ -409,16 +435,10 @@ async fn handle_handshake(
             })
             .await?;
     }
-
-    // Respond on the wire.
-    inner.net.respond_handshake_take(channel, resp).await?;
-
-    if was_new_contact && !already_pending {
-        let _ = event_tx.send(AppEvent::RequestReceived {
-            y7_id: initiator_y7.to_uri(),
-            greeting,
-        });
-    }
+    let _ = event_tx.send(AppEvent::RequestReceived {
+        y7_id: initiator_y7.to_uri(),
+        greeting,
+    });
     Ok(())
 }
 

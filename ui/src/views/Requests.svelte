@@ -19,8 +19,10 @@
 
   let busyIds = $state<Record<number, boolean>>({});
 
+  // Re-pull on every open (not just the first), so the list always reflects
+  // current rows — e.g. after a request was resolved/deleted elsewhere.
   $effect(() => {
-    if (!requests.loadedOnce && !requests.loading) {
+    if (!requests.loading) {
       void refreshRequests();
     }
   });

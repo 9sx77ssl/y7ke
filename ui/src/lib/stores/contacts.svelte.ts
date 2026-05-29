@@ -40,17 +40,16 @@ export const contacts = {
     return state.items.filter((c) => c.status === "accepted");
   },
   /**
-   * Everything the sidebar should render: accepted contacts and any still-
-   * pending ones (so the sender sees their pending peer immediately after
-   * `send_contact_request` instead of waiting for them to message back).
-   * Excludes `blocked` and `removed`.
+   * Everything the sidebar should render: accepted contacts + your own
+   * outgoing-pending ones (so the sender sees "waiting for accept" right
+   * after `send_contact_request`). `pending_in` is intentionally EXCLUDED —
+   * an incoming request surfaces ONLY in the requests view, not as a chat in
+   * the sidebar, until you accept it (which flips it to accepted). Also
+   * excludes `blocked` and `removed`.
    */
   get visible(): ContactView[] {
     return state.items.filter(
-      (c) =>
-        c.status === "accepted" ||
-        c.status === "pending_out" ||
-        c.status === "pending_in",
+      (c) => c.status === "accepted" || c.status === "pending_out",
     );
   },
 };

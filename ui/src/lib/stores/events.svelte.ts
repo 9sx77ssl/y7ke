@@ -22,6 +22,7 @@ import { applyPresence } from "./presence.svelte";
 import {
   applyRequestReceived,
   applyRequestResolved,
+  refreshRequests,
 } from "./requests.svelte";
 import { openEmpty, router } from "./route.svelte";
 import { refreshSettings } from "./settings.svelte";
@@ -113,6 +114,11 @@ function dispatch(ev: AppEvent): void {
       break;
     case "contact_removed":
       applyContactRemoved(ev.y7_id);
+      // Deleting a contact also wipes any pending request row for the peer
+      // (wipe_peer), so re-pull requests — otherwise a now-deleted outgoing
+      // request lingers in the requests view and acting on it errors "not
+      // found" (its row is already gone).
+      void refreshRequests();
       // Eject from chat if it was with the removed peer.
       if (router.pane.kind === "chat" && router.pane.peerY7Id === ev.y7_id) {
         openEmpty();
