@@ -30,7 +30,13 @@ pub(crate) struct BootstrapPingState {
 
 pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
-const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+// Outer guard on the first send. Must sit ABOVE the request-response
+// timeout (15 s, behaviour.rs) — a shorter cap abandons the oneshot while
+// the wire request is still alive, discarding a slow-but-succeeding ack and
+// spuriously re-queueing (the "every other message hangs at sending" bug).
+// 20 s leaves headroom past the 15 s rr timeout while still bounding a
+// genuinely wedged oneshot.
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -574,6 +580,12 @@ async fn run_presence_ticker(
                                     );
                                 }
                             }
+                            // Self-heal: re-drive any due queued message over
+                            // the live (relayed) path so a send that stranded
+                            // mid-flap reaches a terminal status without
+                            // waiting for a full reconnect. Schedule-respecting
+                            // so backoff still decays.
+                            drain_due_for_connected_peer(&inner, &event_tx, c.y7_id).await;
                         }
                         Err(e) => {
                             tracing::debug!(y7_id = %c.y7_id, error = %e, "relayed check_live failed");
@@ -597,7 +609,13 @@ async fn run_presence_ticker(
                         .map(|m| m.keys().copied().collect())
                         .unwrap_or_default();
                     match inner.net.check_live(c.y7_id).await {
-                        Ok(true) => {} // still connected, nothing to do
+                        Ok(true) => {
+                            // Still connected — re-drive any due queued message
+                            // so a send stranded by a transient routing flap
+                            // self-heals to a terminal status. Schedule-
+                            // respecting so backoff decays for a wedged peer.
+                            drain_due_for_connected_peer(&inner, &event_tx, c.y7_id).await;
+                        }
                         Ok(false) => {
                             {
                                 let mut conns = inner.connections.write().await;
@@ -636,6 +654,29 @@ async fn run_presence_ticker(
                 }
             }
         }
+    }
+}
+
+/// Periodic-ticker helper: re-drive due queued messages to an already-
+/// connected peer. Schedule-respecting (only rows whose `next_retry_at` has
+/// elapsed) so a wedged message self-heals without out-running its backoff.
+/// Errors are logged, never fatal — the next tick retries.
+async fn drain_due_for_connected_peer(
+    inner: &Arc<AppInner>,
+    event_tx: &broadcast::Sender<AppEvent>,
+    y7: Y7Id,
+) {
+    let peer_id = match y7ke_net::peer_id_from_y7(&y7) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::debug!(y7_id = %y7, error = %e, "drain: peer_id_from_y7 failed");
+            return;
+        }
+    };
+    if let Err(e) =
+        crate::event_loop::drain_queue_for_peer(inner, event_tx, &y7, peer_id, true).await
+    {
+        tracing::debug!(y7_id = %y7, error = %e, "drain: queue drain failed");
     }
 }
 

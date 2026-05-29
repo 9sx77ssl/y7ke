@@ -196,6 +196,37 @@ impl<'db> MessagesDao<'db> {
 
         rows.into_iter().map(RawMessage::decode).collect()
     }
+
+    /// Promote OUR outbound rows the peer already holds to `Synced`.
+    ///
+    /// `upto_id` is the highest of our messages the peer reports as inbound
+    /// (their `ConversationDigest.highest_inbound_msg_id`). Every local row in
+    /// `conv` that we (`sender_pub`) sent with `message_id <= upto_id` and a
+    /// non-terminal status reached the peer — even if the live ack was lost to
+    /// a relay→direct flap — so it can move to `Synced`. Returns the ids that
+    /// actually changed so the caller emits `MessageStatusChanged` and drops
+    /// the queue rows only for real transitions (idempotent re-runs are free).
+    pub async fn promote_outbound_synced(
+        &self,
+        conv: &ConversationId,
+        sender_pub: &[u8; 32],
+        upto_id: &MessageId,
+    ) -> Result<Vec<MessageId>> {
+        let rows: Vec<(Vec<u8>,)> = sqlx::query_as(
+            "UPDATE messages SET status = ? \
+             WHERE conversation_id = ? AND sender_pub = ? AND message_id <= ? AND status < ? \
+             RETURNING message_id",
+        )
+        .bind(MessageStatus::Synced.as_i64())
+        .bind(&conv.as_bytes()[..])
+        .bind(&sender_pub[..])
+        .bind(&upto_id.as_bytes()[..])
+        .bind(MessageStatus::Synced.as_i64())
+        .fetch_all(self.pool)
+        .await
+        .map_err(|e| AppError::storage(format!("messages.promote_outbound_synced: {e}")))?;
+        rows.into_iter().map(|(b,)| try_msg_id(b)).collect()
+    }
 }
 
 #[derive(sqlx::FromRow)]

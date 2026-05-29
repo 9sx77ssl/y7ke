@@ -72,7 +72,7 @@ async fn dispatch(
                         let _ = inner.db.peer_state().upsert_seen(&y7, Some(json)).await;
                     }
                 }
-                drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+                drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "peer discovered without recoverable Y7Id");
@@ -115,7 +115,7 @@ async fn dispatch(
                     connection: best,
                     transport,
                 });
-                drain_queue_for_peer(inner, event_tx, &y7, peer).await?;
+                drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "connection established with non-Ed25519 peer (V1 should never see this)");
@@ -130,8 +130,7 @@ async fn dispatch(
             // V2-A5: DCUtR succeeded. libp2p also fired a
             // ConnectionEstablished for this same connection_id,
             // classified Internet by its endpoint — relabel that entry
-            // `Direct` so best_kind promotes it. No queue drain: the
-            // relay path already delivered any in-flight messages.
+            // `Direct` so best_kind promotes it.
             inner
                 .dcutr_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -162,6 +161,11 @@ async fn dispatch(
                     connection: best,
                     transport,
                 });
+                // The relay→direct swap can strand a request-response message
+                // that libp2p pinned to the now-folded relayed connection
+                // (it does not migrate in-flight requests). Re-drive the whole
+                // outbox over the fresh direct path so nothing sits at Sending.
+                drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
             }
             Ok(())
         }
@@ -771,16 +775,28 @@ fn empty_sync_resp_for(req: &SyncReq) -> SyncResp {
     }
 }
 
-/// On peer reconnect, retry any outbound messages we have queued for them.
-/// Successful sends drop the row from `sync_queue` and update
-/// `messages.status` to `Synced` (peer acked → both sides hold the row).
-async fn drain_queue_for_peer(
+/// Re-send queued (status==Sending) messages to a now-reachable peer. A
+/// successful send flips the row to `Delivered` and drops it from `sync_queue`.
+///
+/// `respect_schedule=false` (a fresh reconnect — PeerDiscovered /
+/// ConnectionEstablished / DCUtR upgrade) flushes EVERY queued row regardless
+/// of its `next_retry_at` backoff, so a reconnect drains the whole outbox at
+/// once. `respect_schedule=true` (the periodic presence ticker) drains only
+/// rows whose `next_retry_at` is due, so a long-connected peer self-heals
+/// stranded messages without re-sending faster than the backoff allows.
+pub(crate) async fn drain_queue_for_peer(
     inner: &Arc<AppInner>,
     event_tx: &broadcast::Sender<AppEvent>,
     peer_y7: &Y7Id,
     peer_id: PeerId,
+    respect_schedule: bool,
 ) -> Result<()> {
-    let due = inner.db.sync_queue().due(i64::MAX, 256).await?;
+    let before = if respect_schedule {
+        y7ke_storage::now_ms()
+    } else {
+        i64::MAX
+    };
+    let due = inner.db.sync_queue().due(before, 256).await?;
     for entry in due {
         if &entry.target_peer_y7_id != peer_y7 {
             continue;
@@ -811,7 +827,8 @@ async fn drain_queue_for_peer(
             .await
         {
             Ok(resp) if resp.ack => {
-                // M1: peer acked → both sides hold it → Synced (not Sent).
+                // Peer's RR handler acked receipt → Delivered. (A later sync
+                // reconcile may promote it again to Synced.)
                 inner
                     .db
                     .messages()
@@ -929,6 +946,28 @@ async fn kick_sync_for_peer(
     let Some(their) = their else {
         return Ok(());
     };
+
+    // Sender-side reconcile: any of OUR outbound rows the peer already holds
+    // (message_id <= the highest they report as inbound-from-us) reached them,
+    // even if the live ack was lost to a relay→direct flap. Promote those to
+    // Synced and drop their queue rows so a delivered message can't stay stuck
+    // on the sending clock. Idempotent — only rows that actually change come
+    // back, so re-runs emit nothing.
+    if let Some(their_in) = their.highest_inbound_msg_id {
+        let bound = y7ke_core::MessageId::from_bytes(their_in);
+        let promoted = inner
+            .db
+            .messages()
+            .promote_outbound_synced(&conv, &inner.my_pubkey, &bound)
+            .await?;
+        for id in promoted {
+            let _ = inner.db.sync_queue().remove(&id, peer_y7).await;
+            let _ = event_tx.send(AppEvent::MessageStatusChanged {
+                message_id: id.to_string(),
+                status: MessageStatus::Synced,
+            });
+        }
+    }
 
     // UUIDv7 byte-order matches chronological + SQL ORDER BY.
     let need_pull = match (their.highest_outbound_msg_id, my_inbound) {
