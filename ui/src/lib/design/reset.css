@@ -15,7 +15,10 @@ body,
 }
 
 #app {
-  border-radius: var(--y7-r-lg);
+  /* Solid (non-transparent) frameless window: square corners — rounded
+   * corners would expose the opaque window behind them. The transparent
+   * window mode was dropped because webkit2gtk on Linux mis-sizes the
+   * webview on first paint (layout "broken on launch" until a resize). */
   overflow: hidden;
 }
 
