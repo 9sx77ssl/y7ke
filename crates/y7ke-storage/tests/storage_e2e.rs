@@ -217,3 +217,83 @@ async fn peer_state_upserts() {
     assert!(state.last_seen_at.is_some());
     assert_eq!(state.highest_seen_message_id, Some(mid));
 }
+
+#[tokio::test]
+async fn pending_deletes_enqueue_due_bump_remove() {
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(DbConfig::in_dir(dir.path())).await.unwrap();
+
+    let peer = Y7Id::from_pubkey([7u8; 32]);
+    let envelope = vec![0xab; 64];
+    db.pending_deletes()
+        .enqueue(&peer, &envelope, 1_000)
+        .await
+        .unwrap();
+
+    let got = db.pending_deletes().get(&peer).await.unwrap().unwrap();
+    assert_eq!(got.peer_y7_id, peer);
+    assert_eq!(got.envelope, envelope);
+    assert_eq!(got.attempts, 0);
+
+    let due = db.pending_deletes().due(2_000, 10).await.unwrap();
+    assert_eq!(due.len(), 1);
+
+    // Bump past the window → no longer due.
+    db.pending_deletes().bump(&peer, 1, 10_000).await.unwrap();
+    assert!(db
+        .pending_deletes()
+        .due(2_000, 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        db.pending_deletes()
+            .get(&peer)
+            .await
+            .unwrap()
+            .unwrap()
+            .attempts,
+        1
+    );
+
+    db.pending_deletes().remove(&peer).await.unwrap();
+    assert!(db.pending_deletes().get(&peer).await.unwrap().is_none());
+}
+
+/// The sealed ChatDeleted must outlive the local wipe — otherwise the delete
+/// could never reach an offline peer. wipe_peer clears the session/contact/
+/// messages but must leave the pending_deletes row intact for retry.
+#[tokio::test]
+async fn pending_delete_survives_wipe_peer() {
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(DbConfig::in_dir(dir.path())).await.unwrap();
+
+    let me = Y7Id::from_pubkey([1u8; 32]);
+    let peer = Y7Id::from_pubkey([2u8; 32]);
+    let conv = ConversationId::between(&me, &peer);
+
+    // State that wipe_peer SHOULD clear.
+    db.sessions().upsert(&peer).await.unwrap();
+    db.contacts()
+        .insert(NewContact {
+            y7_id: peer,
+            ed25519_pub: [2u8; 32],
+            nickname: None,
+            status: ContactStatus::Accepted,
+        })
+        .await
+        .unwrap();
+
+    // The durable delete envelope, queued before the wipe.
+    db.pending_deletes()
+        .enqueue(&peer, &[0xcd; 48], 0)
+        .await
+        .unwrap();
+
+    db.wipe_peer(&peer, &conv).await.unwrap();
+
+    assert!(db.sessions().get(&peer).await.unwrap().is_none());
+    assert!(db.contacts().get(&peer).await.unwrap().is_none());
+    // The deletion outbox survives so it can still be delivered on reconnect.
+    assert!(db.pending_deletes().get(&peer).await.unwrap().is_some());
+}

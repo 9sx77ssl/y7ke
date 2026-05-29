@@ -73,6 +73,7 @@ async fn dispatch(
                     }
                 }
                 drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
+                flush_pending_delete(inner, &y7, peer).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "peer discovered without recoverable Y7Id");
@@ -116,6 +117,7 @@ async fn dispatch(
                     transport,
                 });
                 drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
+                flush_pending_delete(inner, &y7, peer).await?;
                 spawn_kick_sync(inner.clone(), event_tx.clone(), y7, peer);
             } else {
                 tracing::warn!(%peer, "connection established with non-Ed25519 peer (V1 should never see this)");
@@ -852,6 +854,50 @@ pub(crate) async fn drain_queue_for_peer(
                     .bump(&message.message_id, peer_y7, entry.attempts + 1, next)
                     .await?;
             }
+        }
+    }
+    Ok(())
+}
+
+/// Deliver a queued `ChatDeleted` to `peer` if one is pending. The envelope was
+/// sealed before the local wipe and persisted, so this needs no live session.
+/// On ack the row is removed; otherwise it's bumped for the next reconnect.
+/// This is what fulfils "the peer's copy is wiped the next time they come
+/// online" — called from the immediate post-delete attempt and every reconnect.
+pub(crate) async fn flush_pending_delete(
+    inner: &Arc<AppInner>,
+    peer_y7: &Y7Id,
+    peer_id: PeerId,
+) -> Result<()> {
+    let Some(pending) = inner.db.pending_deletes().get(peer_y7).await? else {
+        return Ok(());
+    };
+    let envelope: MessageEnvelope = match serde_json::from_slice(&pending.envelope) {
+        Ok(e) => e,
+        Err(e) => {
+            // Corrupt row — drop it rather than retry a doomed send forever.
+            tracing::warn!(%peer_y7, error = %e, "pending ChatDeleted envelope corrupt; dropping");
+            let _ = inner.db.pending_deletes().remove(peer_y7).await;
+            return Ok(());
+        }
+    };
+    match inner
+        .net
+        .send_msg(peer_id, y7ke_net::protocol::MsgReq { envelope })
+        .await
+    {
+        Ok(resp) if resp.ack => {
+            inner.db.pending_deletes().remove(peer_y7).await?;
+            tracing::info!(%peer_y7, "pending ChatDeleted delivered");
+        }
+        other => {
+            tracing::debug!(%peer_y7, ?other, "pending ChatDeleted send failed; will retry on reconnect");
+            let next = next_retry_at(pending.attempts);
+            let _ = inner
+                .db
+                .pending_deletes()
+                .bump(peer_y7, pending.attempts + 1, next)
+                .await;
         }
     }
     Ok(())

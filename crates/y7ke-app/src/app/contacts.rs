@@ -332,15 +332,77 @@ impl AppHandle {
         Ok(())
     }
 
-    /// Wipe a conversation locally + notify the peer.
+    /// Wipe a conversation locally + reliably notify the peer.
+    ///
+    /// The `ChatDeleted` control must reach the peer even if they're offline
+    /// right now (the UI promises "wiped on both sides the next time they come
+    /// online"). We can't seal it after the wipe — that destroys the session —
+    /// so seal it NOW and persist it to `pending_deletes`, which survives the
+    /// wipe and is retried on the peer's next reconnect. A best-effort
+    /// immediate send covers the common "still connected" case.
     pub async fn delete_contact(&self, peer: Y7Id) -> Result<()> {
-        self.send_control(&peer, messaging::ControlPayload::ChatDeleted)
-            .await;
+        self.enqueue_chat_deleted(&peer).await;
         crate::event_loop::wipe_conversation(&self.inner, &peer).await?;
         let _ = self.event_tx.send(AppEvent::ContactRemoved {
             y7_id: peer.to_uri(),
         });
+        // Immediate delivery attempt in the background so the local delete
+        // stays instant; if it fails, the reconnect drain retries from the
+        // persisted envelope.
+        if let Ok(peer_id) = peer_id_from_y7(&peer) {
+            let inner = std::sync::Arc::clone(&self.inner);
+            tokio::spawn(async move {
+                let _ = crate::event_loop::flush_pending_delete(&inner, &peer, peer_id).await;
+            });
+        }
         Ok(())
+    }
+
+    /// Seal the `ChatDeleted` control while the session still exists and stash
+    /// the sealed envelope in `pending_deletes` (survives the local wipe). No
+    /// session → the peer never knew us, so there's nothing to propagate.
+    async fn enqueue_chat_deleted(&self, peer: &Y7Id) {
+        if self
+            .inner
+            .db
+            .sessions()
+            .get(peer)
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return;
+        }
+        let conv = y7ke_core::ConversationId::between(&self.inner.my_y7_id, peer);
+        let Ok(conv_key) =
+            messaging::derive_conv_key(&self.inner.me, peer.pubkey(), conv.as_bytes())
+        else {
+            tracing::warn!(%peer, "derive_conv_key failed for ChatDeleted");
+            return;
+        };
+        let Ok((_mid, envelope, _ts)) = messaging::seal_control(
+            &self.inner.me,
+            &self.inner.my_pubkey,
+            &conv_key,
+            &messaging::ControlPayload::ChatDeleted,
+        ) else {
+            tracing::warn!(%peer, "seal_control failed for ChatDeleted");
+            return;
+        };
+        let Ok(bytes) = serde_json::to_vec(&envelope) else {
+            tracing::warn!(%peer, "serialize ChatDeleted envelope failed");
+            return;
+        };
+        if let Err(e) = self
+            .inner
+            .db
+            .pending_deletes()
+            .enqueue(peer, &bytes, y7ke_storage::now_ms())
+            .await
+        {
+            tracing::warn!(%peer, error = %e, "persist pending ChatDeleted failed");
+        }
     }
 
     pub async fn list_contacts(&self) -> Result<Vec<ContactView>> {

@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.14] — 2026-05-29
+
+- fix(delete): durable ChatDeleted propagation + square frameless corners
+
 ## [3.0.13] — 2026-05-29
 
 - fix(msg): reliable delivery — drain on relay→direct upgrade, periodic retry, lost-ack reconcile

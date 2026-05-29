@@ -15,11 +15,9 @@ body,
 }
 
 #app {
-  /* Rounded frameless corners (transparent window). Safe again now that the
-   * window is shown only after GTK realizes it (see main.rs show-after-ready)
-   * — the first-paint mis-size that looked like a transparency bug is fixed
-   * at the source, so the look is restored. */
-  border-radius: var(--y7-r-lg);
+  /* Square frameless corners — the transparent window left faint rounded
+   * notches at the corners; the user wants them fully square. */
+  border-radius: 0;
   overflow: hidden;
 }
 

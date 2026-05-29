@@ -133,6 +133,10 @@ impl Db {
         dao::sync_queue::SyncQueueDao::new(&self.pool)
     }
 
+    pub fn pending_deletes(&self) -> dao::pending_deletes::PendingDeletesDao<'_> {
+        dao::pending_deletes::PendingDeletesDao::new(&self.pool)
+    }
+
     pub fn peer_state(&self) -> dao::peer_state::PeerStateDao<'_> {
         dao::peer_state::PeerStateDao::new(&self.pool)
     }
