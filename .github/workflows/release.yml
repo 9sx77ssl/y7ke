@@ -57,14 +57,23 @@ jobs:
         run: |
           # If a release already exists for this tag, don't republish.
           # gh CLI exits non-zero when the release isn't found.
-          if gh release view "${{ steps.ver.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "release for ${{ steps.ver.outputs.tag }} already exists — skipping"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            # Loud, not silent: a branch push that lands here without a
+            # version bump (hookless squash/merge/contributor) would
+            # otherwise drop its release with a green check. Surface it.
+            if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+              echo "::warning::release for $TAG already exists — skipping. Did the version get bumped? Hookless merges/squashes don't bump the version."
+            else
+              echo "release for $TAG already exists — skipping"
+            fi
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           else
             echo "proceed=true"  >> "$GITHUB_OUTPUT"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          REPO: ${{ github.repository }}
 
       - name: Create + push tag if missing
         if: steps.gate.outputs.proceed == 'true' && github.ref_type == 'branch'
@@ -78,8 +87,59 @@ jobs:
             git push origin "${{ steps.ver.outputs.tag }}"
           fi
 
-  build:
+  # Quality gate: a release must pass the same deterministic checks CI runs
+  # (fmt + clippy -D warnings + tsc + UI build + lib tests) BEFORE we build
+  # and publish bundles. Without this, release.yml races ci.yml on the push
+  # and could ship a tag for a commit that fails lint/type/tests.
+  gate:
     needs: resolve
+    if: needs.resolve.outputs.proceed == 'true'
+    name: quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: ui
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --lib --no-fail-fast
+      - run: pnpm tsc --noEmit
+        working-directory: ui
+      - run: pnpm build
+        working-directory: ui
+
+  build:
+    needs: [resolve, gate]
     if: needs.resolve.outputs.proceed == 'true'
     strategy:
       fail-fast: false
@@ -87,6 +147,10 @@ jobs:
         platform: [ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.platform }}
+    # Linux is the canonical target and must succeed; Windows is best-effort
+    # (mirrors ci.yml) so a Windows-only bundling failure reports loudly but
+    # doesn't block the Linux release from publishing.
+    continue-on-error: ${{ matrix.platform == 'windows-latest' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -109,10 +173,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            .
-            src-tauri
 
       - uses: pnpm/action-setup@v4
         with:
@@ -147,7 +207,9 @@ jobs:
         with:
           name: y7ke-linux
           path: target/release/bundle/appimage/*.AppImage
-          if-no-files-found: warn
+          # error (not warn): a bundle that produces no file must fail the
+          # build so we never publish a release missing a platform binary.
+          if-no-files-found: error
 
       - name: Upload Windows .exe
         if: matrix.platform == 'windows-latest'
@@ -155,7 +217,7 @@ jobs:
         with:
           name: y7ke-windows
           path: target/release/bundle/nsis/*.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
   publish:
     needs: [resolve, build]

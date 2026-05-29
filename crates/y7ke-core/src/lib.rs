@@ -10,7 +10,7 @@ pub mod id;
 pub mod settings;
 pub mod status;
 
-pub use diagnostics::{ConnectionView, DcutrStats};
+pub use diagnostics::{ConnectionView, DcutrStats, DiagnosticsDetail, NatDetail, RateLimitDrops};
 pub use error::{AppError, Result};
 pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};

@@ -139,6 +139,7 @@ export function selectBestBootstrap(): Promise<string | null> {
 import type { DcutrStats } from "./gen/DcutrStats";
 import type { NatReachability } from "./gen/NatReachability";
 import type { ConnectionView } from "./gen/ConnectionView";
+import type { DiagnosticsDetail } from "./gen/DiagnosticsDetail";
 
 export function getDcutrStats(): Promise<DcutrStats> {
   return call<DcutrStats>("get_dcutr_stats");
@@ -146,6 +147,10 @@ export function getDcutrStats(): Promise<DcutrStats> {
 
 export function getNatStatus(): Promise<NatReachability> {
   return call<NatReachability>("get_nat_status");
+}
+
+export function getDiagnosticsDetail(): Promise<DiagnosticsDetail> {
+  return call<DiagnosticsDetail>("get_diagnostics_detail");
 }
 
 export function listActiveConnections(): Promise<ConnectionView[]> {

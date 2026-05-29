@@ -88,6 +88,19 @@ pub(crate) struct AppInner {
     pub dcutr_attempts: std::sync::atomic::AtomicU64,
     pub dcutr_successes: std::sync::atomic::AtomicU64,
     pub dcutr_failures: std::sync::atomic::AtomicU64,
+    /// Last few DCUtR failure reason strings (bounded ring, oldest first).
+    /// The counters above say how many failed; this says why. Surfaced in
+    /// the diagnostics export via `diagnostics_detail`.
+    pub dcutr_recent_failures: tokio::sync::Mutex<std::collections::VecDeque<String>>,
+    /// Inbound RPCs refused by the rate limiter since boot, per protocol.
+    /// Counted at the warn sites in event_loop so a silent drop storm is
+    /// visible in the diagnostics export. Atomic for lock-free command reads.
+    pub rl_drops_handshake: std::sync::atomic::AtomicU64,
+    pub rl_drops_msg: std::sync::atomic::AtomicU64,
+    pub rl_drops_sync: std::sync::atomic::AtomicU64,
+    /// (tested_addr, probe-server PeerId) of the last AutoNAT probe absorbed.
+    /// Kept out of `nat_status` so that stays `Copy`; surfaced in the export.
+    pub nat_probe_detail: tokio::sync::RwLock<Option<(String, String)>>,
     /// Wake signal for the presence ticker. Fired by `update_settings`
     /// (mode change) and by `handle_nat_status` (verdict flip) so
     /// presence/relay-upgrade work happens within ~1 s of the event
@@ -239,6 +252,11 @@ impl AppHandle {
             dcutr_attempts: std::sync::atomic::AtomicU64::new(0),
             dcutr_successes: std::sync::atomic::AtomicU64::new(0),
             dcutr_failures: std::sync::atomic::AtomicU64::new(0),
+            dcutr_recent_failures: tokio::sync::Mutex::new(std::collections::VecDeque::new()),
+            rl_drops_handshake: std::sync::atomic::AtomicU64::new(0),
+            rl_drops_msg: std::sync::atomic::AtomicU64::new(0),
+            rl_drops_sync: std::sync::atomic::AtomicU64::new(0),
+            nat_probe_detail: tokio::sync::RwLock::new(None),
             wake_notify: tokio::sync::Notify::new(),
             upgrade_backoff: tokio::sync::RwLock::new(HashMap::new()),
             reconnect_backoff: tokio::sync::RwLock::new(HashMap::new()),

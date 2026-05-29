@@ -93,6 +93,13 @@ export async function saveSettings(
     };
     await updateSettings(next);
     state.settings = next;
+    // Reconcile the bootstrap list with the just-persisted state immediately.
+    // Without this, saveSettings updates state.settings but not
+    // state.bootstraps, so the Settings re-hydrate effect briefly re-renders
+    // the STALE pre-save rows (a just-added row vanishes / a removed one
+    // reappears) until the async SettingsChanged → refreshSettings round-trip
+    // lands. Fetching here closes that window.
+    state.bootstraps = await listBootstraps();
     logger.info("saved");
   } catch (err) {
     state.error = err instanceof Error ? err.message : String(err);

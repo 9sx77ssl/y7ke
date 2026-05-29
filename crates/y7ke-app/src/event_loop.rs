@@ -16,6 +16,10 @@ use y7ke_storage::dao::requests::{NewRequest, RequestDirection};
 use crate::app::AppInner;
 use crate::{handshake, messaging};
 
+/// How many recent DCUtR failure reasons to retain for the diagnostics
+/// export. Small — only the latest handful aids triage.
+const DCUTR_FAILURE_RING: usize = 5;
+
 /// Main entry point. Runs until the broadcast channel closes (i.e. the
 /// swarm task has exited).
 pub(crate) async fn run(
@@ -168,6 +172,15 @@ async fn dispatch(
             inner
                 .dcutr_failures
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // Keep the last few reasons (why the hole-punch failed) for the
+            // diagnostics export — the counts alone don't aid triage.
+            {
+                let mut ring = inner.dcutr_recent_failures.lock().await;
+                ring.push_back(format!("{peer}: {error}"));
+                while ring.len() > DCUTR_FAILURE_RING {
+                    ring.pop_front();
+                }
+            }
             tracing::debug!(%peer, %error, "dcutr upgrade failed (stays on relay)");
             Ok(())
         }
@@ -282,6 +295,10 @@ async fn handle_nat_status(
     let now = state.verdict;
     drop(state);
 
+    // Retain the probe detail for the diagnostics export (the always-on UI
+    // shows only the aggregate verdict).
+    *inner.nat_probe_detail.write().await = Some((tested_addr.to_string(), server.to_string()));
+
     tracing::debug!(%tested_addr, %server, reachable, ?previous, ?now, "autonat: probe absorbed");
 
     if previous != now {
@@ -310,6 +327,9 @@ async fn handle_handshake(
     >,
 ) -> Result<()> {
     if !inner.rate_limiter.allow_handshake(libp2p_peer).await {
+        inner
+            .rl_drops_handshake
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         tracing::warn!(%libp2p_peer, "handshake rate-limited; refusing");
         let reject = handshake::reject_response(&inner.me, &inner.my_pubkey, &request);
         inner.net.respond_handshake_take(channel, reject).await?;
@@ -410,6 +430,9 @@ async fn handle_msg(
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<MsgResp>>,
 ) -> Result<()> {
     if !inner.rate_limiter.allow_msg(libp2p_peer).await {
+        inner
+            .rl_drops_msg
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         tracing::warn!(%libp2p_peer, "msg rate-limited; refusing");
         inner
             .net
@@ -577,6 +600,9 @@ async fn handle_sync(
     channel: y7ke_net::handle::TakeOnce<libp2p::request_response::ResponseChannel<SyncResp>>,
 ) -> Result<()> {
     if !inner.rate_limiter.allow_sync(peer).await {
+        inner
+            .rl_drops_sync
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         tracing::warn!(%peer, "sync rate-limited; refusing");
         let resp = empty_sync_resp_for(&request);
         inner.net.respond_sync_take(channel, resp).await?;

@@ -353,7 +353,7 @@
   .tone-warn {
     color: var(--y7-warn);
     background: var(--y7-warn-soft);
-    border-color: rgba(245, 200, 50, 0.3);
+    border-color: var(--y7-warn-border);
   }
   .tone-fail {
     color: var(--y7-red);

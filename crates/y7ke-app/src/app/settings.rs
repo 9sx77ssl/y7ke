@@ -35,6 +35,38 @@ impl AppHandle {
         self.inner.nat_status.read().await.verdict
     }
 
+    /// Verbose diagnostics for the copy-diagnostics export: recent DCUtR
+    /// failure reasons, rate-limit drop counts, and AutoNAT probe detail.
+    /// These don't belong in the always-on compact UI but are load-bearing
+    /// in a bug report from a non-technical user.
+    pub async fn get_diagnostics_detail(&self) -> y7ke_core::DiagnosticsDetail {
+        use std::sync::atomic::Ordering::Relaxed;
+        let recent_dcutr_failures = self
+            .inner
+            .dcutr_recent_failures
+            .lock()
+            .await
+            .iter()
+            .cloned()
+            .collect();
+        let nat = *self.inner.nat_status.read().await;
+        let probe = self.inner.nat_probe_detail.read().await.clone();
+        y7ke_core::DiagnosticsDetail {
+            recent_dcutr_failures,
+            rate_limit_drops: y7ke_core::RateLimitDrops {
+                handshake: self.inner.rl_drops_handshake.load(Relaxed),
+                msg: self.inner.rl_drops_msg.load(Relaxed),
+                sync: self.inner.rl_drops_sync.load(Relaxed),
+            },
+            nat_detail: y7ke_core::NatDetail {
+                verdict: nat.verdict,
+                consecutive_failures: nat.consecutive_failures,
+                last_tested_addr: probe.as_ref().map(|(a, _)| a.clone()),
+                last_probe_server: probe.as_ref().map(|(_, s)| s.clone()),
+            },
+        }
+    }
+
     /// Snapshot every active connection's metadata for the Connectivity
     /// debug pane. Builds a ConnectionView per peer that has a
     /// non-Offline entry in the presence map, joining the kind,

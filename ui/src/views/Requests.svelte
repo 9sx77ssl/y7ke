@@ -30,11 +30,13 @@
     else delete busyIds[id];
   }
 
+  // Success feedback for accept/reject/cancel is emitted once from the
+  // request_resolved event handler (the single source of truth for both
+  // local and peer-driven resolutions), so these only surface errors.
   async function accept(id: number): Promise<void> {
     setBusy(id, true);
     try {
       await acceptRequestAction(id);
-      toast.success("contact accepted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -46,7 +48,6 @@
     setBusy(id, true);
     try {
       await rejectRequestAction(id);
-      toast.info("request rejected");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -58,7 +59,6 @@
     setBusy(id, true);
     try {
       await cancelRequestAction(id);
-      toast.success("request cancelled");
     } catch (err) {
       // If the backend `cancel_request` command isn't wired yet, the error
       // surfaces here instead of crashing the view.

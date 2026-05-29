@@ -8,6 +8,7 @@ import { getVersion } from "@tauri-apps/api/app";
 
 import {
   getDcutrStats,
+  getDiagnosticsDetail,
   getNatStatus,
   listActiveConnections,
   listBootstraps,
@@ -31,11 +32,12 @@ export async function buildDiagnostics(): Promise<string> {
     /* version is best-effort */
   }
 
-  const [nat, dcutr, conns, boots] = await Promise.all([
+  const [nat, dcutr, conns, boots, detail] = await Promise.all([
     getNatStatus(),
     getDcutrStats(),
     listActiveConnections(),
     listBootstraps(),
+    getDiagnosticsDetail(),
   ]);
 
   const att = Number(dcutr.attempts);
@@ -52,7 +54,23 @@ export async function buildDiagnostics(): Promise<string> {
   L.push(`version:        ${version}`);
   L.push(`dial mode:      ${settingsStore.settings?.dial_mode ?? "unknown"}`);
   L.push(`nat status:     ${nat}`);
+  const nd = detail.nat_detail;
+  if (nd.last_tested_addr || nd.consecutive_failures > 0) {
+    L.push(
+      `  nat probe:    ${nd.last_tested_addr ?? "—"}  fails=${nd.consecutive_failures}${nd.last_probe_server ? `  via ${nd.last_probe_server}` : ""}`,
+    );
+  }
   L.push(`dcutr:          ${suc}/${att} (${rate})  failures=${fail}`);
+  for (const r of detail.recent_dcutr_failures) {
+    L.push(`  dcutr fail:   ${r}`);
+  }
+  const rl = detail.rate_limit_drops;
+  const rlTotal = Number(rl.handshake) + Number(rl.msg) + Number(rl.sync);
+  if (rlTotal > 0) {
+    L.push(
+      `rate-limit drops: hs=${Number(rl.handshake)} msg=${Number(rl.msg)} sync=${Number(rl.sync)}`,
+    );
+  }
   L.push(`relay fallback: ${relayActive ? "active" : "no"}`);
   L.push("");
   L.push(`bootstraps (${boots.length}):`);

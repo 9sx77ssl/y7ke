@@ -43,6 +43,9 @@
   /* Amber tone reserved for warning surfaces (e.g. slow latency badges). */
   --y7-warn: hsl(45, 90%, 55%);
   --y7-warn-soft: hsla(45, 90%, 55%, 0.14);
+  /* Pill border derived from the warn hue so it tracks --y7-warn if retuned
+   * (the green/red/blue pill borders already match their tokens exactly). */
+  --y7-warn-border: hsla(45, 90%, 55%, 0.3);
 
   /* Semantic aliases for connection-kind labels (V2-A4). Online states
    * (LAN/Internet/Direct) reuse the green; Relay uses a muted lavender

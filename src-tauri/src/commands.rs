@@ -199,6 +199,11 @@ pub async fn get_nat_status(app: S<'_>) -> Result<y7ke_core::NatReachability, St
 }
 
 #[tauri::command]
+pub async fn get_diagnostics_detail(app: S<'_>) -> Result<y7ke_core::DiagnosticsDetail, String> {
+    Ok(app.get().await.get_diagnostics_detail().await)
+}
+
+#[tauri::command]
 pub async fn list_active_connections(app: S<'_>) -> Result<Vec<y7ke_core::ConnectionView>, String> {
     Ok(app.get().await.list_active_connections().await)
 }

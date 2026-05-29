@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [0.1.103] — 2026-05-29
+
+- fix(ui+app+ci): post-3.0 audit hardening — reactivity, diagnostics, release gate
+
 ## [0.1.102] — 2026-05-29
 
 - docs: transport-agnostic bootstrap shorthand + QUIC/A5/A6 shipped state

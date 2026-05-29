@@ -129,7 +129,7 @@
       {#if !chat.loading && chat.messages.length === 0 && !chat.error}
         <p class="info">
           no messages yet. say something — it'll deliver as soon as
-          {displayName} is on the lan.
+          {displayName} comes online.
         </p>
       {/if}
 

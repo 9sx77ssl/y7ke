@@ -29,11 +29,22 @@
     item.onClick();
   }
 
-  // Focus the first enabled item when the menu opens so it's keyboard-usable.
-  function focusFirst(node: HTMLElement) {
-    requestAnimationFrame(() =>
-      node.querySelector<HTMLButtonElement>("button.item:not(:disabled)")?.focus(),
-    );
+  // After the menu renders at the raw click coords, clamp it into the
+  // viewport (it's position:fixed, so a right-click near the bottom/right
+  // edge would otherwise render partly off-screen), then focus the first
+  // enabled item for keyboard use.
+  function placeAndFocus(node: HTMLElement) {
+    requestAnimationFrame(() => {
+      const pad = 8;
+      const r = node.getBoundingClientRect();
+      if (r.right > window.innerWidth - pad) {
+        node.style.left = `${Math.max(pad, window.innerWidth - r.width - pad)}px`;
+      }
+      if (r.bottom > window.innerHeight - pad) {
+        node.style.top = `${Math.max(pad, window.innerHeight - r.height - pad)}px`;
+      }
+      node.querySelector<HTMLButtonElement>("button.item:not(:disabled)")?.focus();
+    });
   }
 
   // Roving arrow-key navigation between menu items.
@@ -81,7 +92,7 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onMenuKey}
     oncontextmenu={(e) => e.preventDefault()}
-    use:focusFirst
+    use:placeAndFocus
   >
     {#each items as item}
       <li>

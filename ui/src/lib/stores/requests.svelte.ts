@@ -11,6 +11,7 @@ import {
 } from "../bridge";
 import type { RequestView } from "../types";
 import { refreshContacts } from "./contacts.svelte";
+import { toast } from "../components/toast.svelte";
 
 interface RequestsState {
   items: RequestView[];
@@ -83,7 +84,10 @@ export async function acceptRequestAction(requestId: number): Promise<void> {
 
 export async function rejectRequestAction(requestId: number): Promise<void> {
   await rpcReject(requestId);
-  await refreshRequests();
+  // Reject marks the peer Blocked; refresh contacts too so the stale
+  // pending row drops from the sidebar immediately (not on the next
+  // unrelated presence event).
+  await Promise.all([refreshRequests(), refreshContacts()]);
 }
 
 /**
@@ -93,7 +97,8 @@ export async function rejectRequestAction(requestId: number): Promise<void> {
  */
 export async function cancelRequestAction(requestId: number): Promise<void> {
   await rpcCancel(requestId);
-  await refreshRequests();
+  // Cancel marks the contact Removed — refresh both so the row clears now.
+  await Promise.all([refreshRequests(), refreshContacts()]);
 }
 
 /** Event dispatch hooks — see events.svelte.ts. */
@@ -101,6 +106,23 @@ export function applyRequestReceived(_y7Id: string, _greeting: string | null): v
   void refreshRequests();
 }
 
-export function applyRequestResolved(_y7Id: string, _resolution: string): void {
-  void refreshRequests();
+// A request was resolved — locally OR by the peer. The backend emits this on
+// every resolution path, so it is the single source of truth for resolution
+// feedback: surface the outcome (the three RequestResolution variants) and
+// refresh BOTH stores. Contacts must refresh because reject→Blocked and
+// cancel→Removed mutate the contact row; without it a stale "pending" row
+// lingers in the sidebar until an unrelated presence event fires.
+export function applyRequestResolved(_y7Id: string, resolution: string): void {
+  void Promise.all([refreshRequests(), refreshContacts()]);
+  switch (resolution) {
+    case "accepted":
+      toast.success("contact request accepted");
+      break;
+    case "rejected":
+      toast.info("contact request rejected");
+      break;
+    case "cancelled":
+      toast.info("contact request cancelled");
+      break;
+  }
 }
