@@ -7,6 +7,43 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.26] — 2026-05-30
+
+Observability + IPv6 release (rolls up 3.0.17→3.0.26 since v3.0.16).
+
+### Added
+- **See exactly how you're connected.** The chat header now renders the
+  full path — e.g. `DIRECT · QUIC · IPv6 · via DCUtR` (hole-punched off a
+  relay) vs `RELAY · TCP` — with a plain-English tooltip. The
+  **connectivity O.O** pane shows the same per-connection detail.
+- **Connection provenance, end-to-end.** New `origin` axis (DirectDial /
+  DcutrUpgrade / RelayOnly / PublicIPv6 / PublicIPv4) + `ip_version`
+  (v4/v6) carried on `PresenceChanged` and `ContactView`.
+- **Connection-lineage ring** in the copy-diagnostics export: a
+  timestamped per-peer sequence of every path change
+  (`None→Relayed→Direct`, `Direct→Relayed` downgrades, `→Offline`) so a
+  "was fast, then went slow" report is debuggable after the fact.
+- **Structured `cat=` lifecycle logging** (CONNECTION / DCUTR / RELAY /
+  AUTONAT / IPVERSION) with relay→direct `elapsed_ms` and a derived
+  direct→relay downgrade signal.
+- **IPv6.** Client binds `/ip6/::` best-effort (TCP + QUIC); every
+  dial / discovery / relay path is IP-family-agnostic; `/dns` bootstrap
+  shorthand resolves A **and** AAAA; `::1` direct-dial proof test. (Real
+  cross-host v6 still ops-gated on a bootstrap AAAA + open v6 firewall.)
+
+### Changed
+- **Bootstrap roster** is now sourced ONLY from the in-app Settings page +
+  one hardcoded default; the environment-variable and config-file sources
+  were removed (the UI can't strand the client).
+- Docs consolidated to a single source of truth, `docs/PLAN.md`; CLAUDE.md
+  refreshed.
+
+### Fixed
+- `extract_ip_version` no longer reports a relay's IP family for a circuit
+  connection (a relayed path is `None`, not a fake direct v4/v6).
+- Unblock `cargo tauri dev` on pnpm 11 (`allowBuilds: esbuild`); documented
+  the pnpm major-upgrade store-purge gotcha.
+
 ## [3.0.25] — 2026-05-30
 
 - feat(observability): UI connection lineage + full provenance labels (Phases 3/4/6)

@@ -174,10 +174,21 @@ cd ui && pnpm tsc --noEmit
   `pending_deletes` table (migration 0007); `flush_pending_delete` retries it
   on every reconnect until acked. `Db::wipe_peer` MUST NOT clear
   `pending_deletes` — that's what lets the deletion survive the local wipe.
-- **`pnpm-workspace.yaml`** in `ui/` carries `onlyBuiltDependencies:
-  - esbuild`. pnpm 10 ignores the equivalent `pnpm` field in
-  package.json; the workspace yaml is the only path that lets a
-  fresh checkout `pnpm install` without manual `approve-builds`.
+- **`pnpm-workspace.yaml`** in `ui/` carries BOTH `onlyBuiltDependencies:
+  - esbuild` (honored by pnpm 10 — what CI pins) AND `allowBuilds:
+  esbuild: true` (required by pnpm 11.3+ — what `cargo tauri dev` runs
+  locally). pnpm 10 ignores the equivalent `pnpm` field in package.json;
+  the workspace yaml is the only path that lets a fresh checkout
+  `pnpm install` without manual `approve-builds`. pnpm 11 stopped honoring
+  `onlyBuiltDependencies` alone: it ignores esbuild's build, records it in
+  `node_modules/.modules.yaml`'s `ignoredBuilds`, and makes `pnpm install`
+  exit 1 — which breaks tauri's `beforeDevCommand` deps-status-check. Keep
+  both keys; unknown keys are warned-not-errored by either pnpm version, so
+  the file is safe on both. (Separately: a pnpm major bump leaves
+  `node_modules` linked to the old store — `…/store/vN` — and pnpm wants to
+  purge it; in a no-TTY `cargo tauri dev` that aborts with
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`. One-time `CI=true pnpm
+  install` in `ui/` rebuilds against the new store.)
 - **Bootstrap auto-redial.** A 15-s tick in the swarm task redials
   any configured bootstrap not currently connected; `ConnectionClosed`
   on a bootstrap clears `state.relay_reserved` so the redial re-runs
