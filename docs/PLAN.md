@@ -10,13 +10,19 @@
 encrypted text over libp2p, local-first SQLite, no accounts, no servers
 that can read your messages.
 
-**Status banner (as of 3.0.16, 2026-05-30).** LAN + offline-sync +
+**Status banner (as of 3.0.23, 2026-05-30).** LAN + offline-sync +
 relay-fallback are PROVEN on real sockets (loopback / mDNS on one host).
 Cross-NAT **direct QUIC hole-punch is NOT field-confirmed** — proven only
 on loopback (and there over a TCP relay) and in a netns sim that by design
 falls back to relay (issue #91). Track B crypto uplift (Double Ratchet,
-OS keyring, replay nonce) is **not started**. IPv6 is parse/classify
-plumbing only — the client binds IPv4-only sockets.
+OS keyring, replay nonce) is **not started**. **Connection provenance**
+(`origin`/`ip_version`) + structured `cat=` lifecycle logging are PROVEN
+(code + ts-rs + tests). **IPv6**: the client now binds `/ip6/::` best-effort
+(TCP+QUIC) and `::1` direct dial is PROVEN by test; all dial/discovery/relay
+paths are IP-family-agnostic; but real cross-host v6 is UNVERIFIED — gated on
+the bootstrap publishing an AAAA + opening its v6 firewall (ops, not code).
+Bootstraps are sourced ONLY from the in-app Settings page + one hardcoded
+default (env var + config-file sources removed).
 
 ---
 
@@ -161,13 +167,15 @@ the `/y7ke/msg` wire ciphertext. `PRAGMA secure_delete = ON`.
 | Transport preference sort (QUIC>TCP>relay) | **PROVEN** | `dial_priority.rs` unit tests |
 | Transport surfacing (label DIRECT·QUIC) | **PROVEN (code)** / **UNVERIFIED (test)** | wired end-to-end; no automated assertion |
 | DCUtR relay→direct upgrade *event* | **SIMULATED** | `v2_dcutr_smoke.rs` (loopback, TCP relay) |
-| DCUtR upgrade logged (success + failure) | **PROVEN** | `swarm.rs:852/863`, `event_loop.rs:160` |
+| DCUtR upgrade logged (success + failure) | **PROVEN** | `swarm.rs` netlog `cat=DCUTR`, `event_loop.rs` relay→direct `elapsed_ms` |
+| Connection provenance (`origin`/`ip_version`) | **PROVEN** | `ConnectionOrigin {DirectDial,DcutrUpgrade,RelayOnly,PublicIpv6,PublicIpv4,Unknown}` + ts-rs; surfaced in logs+diagnostics+pane; unit tests |
+| Structured `cat=` lifecycle logging | **PROVEN** | netlog! macro (CONNECTION/DCUTR/RELAY/AUTONAT/…) over existing tracing |
 | AutoNAT verdict plumbing | **SIMULATED** | `autonat_smoke.rs` (event only, not content) |
 | `ConnectionKind::Internet` (outright direct) | **UNVERIFIED** | classifier+precedence only; never produced |
 | QUIC connection migration (RFC 9000) | **UNVERIFIED / non-functional** | drop+re-dial confirmed (commit `e433c92`) |
 | **Cross-NAT QUIC hole-punch (two ISPs)** | **SIMULATED → field PLANNED** | no captured log; #91 open |
-| IPv6 listen / advertise | **PLANNED** | client binds IPv4-only (`swarm.rs:54/58`) |
-| IPv6 direct dial / AAAA bootstrap | **UNVERIFIED** | code path exists, never exercised |
+| IPv6 client listen + `::1` direct dial | **PROVEN (loopback)** | best-effort `/ip6/::` TCP+QUIC (`swarm.rs`), `ipv6_loopback.rs` connects over `::1` |
+| IPv6 full-p2p cross-host | **UNVERIFIED (code-complete, ops-gated)** | all paths family-agnostic (verified); needs bootstrap AAAA + v6 firewall + a 2-machine capture |
 | Track B (keyring / ratchet / replay nonce) | **PLANNED** | not started |
 | D2 Playwright E2E | **PLANNED** | pending type stabilization |
 
@@ -184,8 +192,11 @@ the `/y7ke/msg` wire ciphertext. `PRAGMA secure_delete = ON`.
 - **QUIC does not migrate in place** — an IP change drops the connection
   and re-dials a fresh ConnectionId; resilience comes from the offline
   queue, not RFC 9000 migration.
-- **IPv6 absent in the client** — IPv4-only sockets; no AAAA on the
-  bootstrap; the single biggest gap vs the "mobile 4G" north star.
+- **IPv6 inert end-to-end** — the client binds `/ip6/::` (best-effort) and
+  `::1` direct dial is test-proven; all paths are family-agnostic. But no peer
+  learns a v6 address until the bootstrap publishes an AAAA + opens its v6
+  firewall + advertises a v6 external-addr (ops, not code). Until then v6 is a
+  dormant capability; real cross-host v6 P2P is UNVERIFIED.
 - **No forward secrecy** — static per-conversation key (Track B pending).
 - **Blocked status has no management UI** — reachable by rejecting,
   enforced fail-closed, but no view/undo.
@@ -250,15 +261,18 @@ direct QUIC stays SIMULATED.
 
 - **PROVEN (real sockets, one host):** V1 messaging, offline sync,
   online chat-delete + durable-stash invariant, byte-level privacy, block
-  enforcement, QUIC bind, transport-preference sort, DCUtR logging.
+  enforcement, QUIC bind, transport-preference sort, DCUtR logging,
+  connection provenance (`origin`/`ip_version` + ts-rs + unit tests),
+  structured `cat=` lifecycle logging, IPv6 client listen + `::1` direct dial.
 - **SIMULATED (loopback / netns only):** relay round-trip, DCUtR
   relay→direct upgrade (loopback, TCP relay), QUIC as data transport,
   AutoNAT plumbing, the full relay→direct chain, cross-NAT QUIC hole-punch.
 - **UNVERIFIED:** `Internet` outright-direct kind, `extract_transport`
-  end-to-end, QUIC migration, IPv6 direct dial / AAAA resolution,
-  delete-while-offline flush, bootstrap-side QUIC acceptance.
-- **PLANNED:** IPv6 listen/advertise, Track B (keyring / Double Ratchet /
-  replay nonce), D2 Playwright, block-management UI, V3.
+  end-to-end, QUIC migration, IPv6 full-p2p cross-host (code-complete +
+  family-agnostic, but ops-gated on AAAA + v6 firewall), delete-while-offline
+  flush, bootstrap-side QUIC acceptance.
+- **PLANNED:** Track B (keyring / Double Ratchet / replay nonce), D2
+  Playwright, block-management UI, V3.
 
 > **Maintenance note for future agents:** update the status banner (§ top),
 > the capability matrix (§6), the milestone table (§3), and the

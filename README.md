@@ -136,37 +136,23 @@ tick redials any bootstrap that drops, so a single VPS restart
 recovers in ~10 s instead of waiting for Kad's 5-minute periodic
 bootstrap.
 
-Bootstraps are sourced in this order, first non-empty wins:
+Bootstraps come from exactly two places (the `Y7KE_BOOTSTRAP` env var and the
+`bootstrap.toml` config file were removed — peers are managed only in-app):
 
-1. `Y7KE_BOOTSTRAP=…` env var (comma-separated multiaddrs).
-2. **User settings** — `Settings::extra_bootstraps` from the
-   encrypted SQLite. Set via the in-app **settings :3** page.
-3. `bootstrap.toml` in the per-OS config directory:
+1. **User settings** — `Settings::extra_bootstraps` from the encrypted SQLite,
+   edited on the in-app **settings :3** page. The transport-agnostic shorthand
+   (no `/tcp` or `/udp` segment, e.g. `/dns/bootstrap1.y7v.lol/4101/p2p/12D3KooW…`)
+   is auto-expanded by the client into both a TCP and a QUIC multiaddr; it dials
+   both and prefers QUIC. `/dns` resolves A **and** AAAA (IPv4+IPv6); `/dns4`,
+   `/dns6`, `/ip4`, `/ip6` shorthands and explicit `/tcp`·`/udp` multiaddrs all
+   pass through. If empty:
+2. `y7ke_net::DEFAULT_BOOTSTRAPS` — one hardcoded node baked at build time,
+   currently `/dns/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`
+   (Germany). Raw-IP fallback `/ip4/89.35.130.67/4101/…` if DNS isn't resolving.
 
-   | OS | Path |
-   |---|---|
-   | Linux | `$XDG_CONFIG_HOME/y7ke/bootstrap.toml` (defaults to `~/.config/y7ke/bootstrap.toml`) |
-   | macOS | `~/Library/Application Support/com.y7ke.Y7KE/bootstrap.toml` |
-   | Windows | `%APPDATA%\y7ke\Y7KE\config\bootstrap.toml` (typically `C:\Users\<you>\AppData\Roaming\y7ke\Y7KE\config\bootstrap.toml`) |
-
-   File format:
-   ```toml
-   peers = [
-     "/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooW…",
-   ]
-   ```
-   The transport-agnostic shorthand (no `/tcp` or `/udp` segment) is
-   auto-expanded by the client into both a TCP and a QUIC multiaddr;
-   it dials both and prefers QUIC. Explicit `/tcp` or `/udp`
-   multiaddrs pass through unchanged.
-4. `y7ke_net::DEFAULT_BOOTSTRAPS` — hardcoded fallback at build
-   time, currently `bootstrap1.y7v.lol` (Germany), PeerId
-   `12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`. Raw-IP
-   fallback `/ip4/89.35.130.67/4101/…` if DNS isn't resolving.
-
-Whatever source contributes them, the hardcoded
-`DEFAULT_RELAY_BOOTSTRAP` is **always prepended** (deduped) so a
-typo in user config can never strand the client.
+Either way the hardcoded `DEFAULT_RELAY_BOOTSTRAP` is **always prepended**
+(deduped) and rendered readonly in Settings, so it can never be deleted and a
+typo in the user list can never strand the client.
 
 ### Running your own bootstrap
 
