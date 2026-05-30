@@ -1,11 +1,22 @@
 <script lang="ts" module>
   import type { ConnectionKind } from "../gen/ConnectionKind";
   import type { Transport } from "../gen/Transport";
+  import type { IpVersion } from "../gen/IpVersion";
+  import type { ConnectionOrigin } from "../gen/ConnectionOrigin";
+  import {
+    ipFamilyLabel,
+    originTag,
+    originPhrase,
+  } from "../stores/presence.svelte";
 
   export interface ConnectionLabelProps {
     kind: ConnectionKind;
     /** Underlying transport of the live connection (QUIC / TCP). */
     transport?: Transport | null;
+    /** IP family of the live connection (v4 / v6). */
+    ipVersion?: IpVersion | null;
+    /** HOW the connection was established (direct dial / DCUtR / relay / …). */
+    origin?: ConnectionOrigin | null;
     /** Hostname shown in the relay tooltip. */
     relayHost?: string;
   }
@@ -16,19 +27,22 @@
 <script lang="ts">
   // V2-A4/A5: small uppercase label that sits next to a peer's nickname
   // and surfaces *how* the connection is carried (LAN / Internet / Relay /
-  // Direct) plus the transport (QUIC / TCP), e.g. "DIRECT · QUIC". The
-  // StatusDot already says online-vs-offline; this label adds the
-  // path+transport nuance. Hidden for offline / connecting — the dot
-  // speaks for those.
+  // Direct), the transport (QUIC / TCP), the IP family (IPv4 / IPv6) and —
+  // when it isn't obvious from the kind — the provenance (via DCUtR), e.g.
+  // "DIRECT · QUIC · IPv6 · via DCUtR". The StatusDot already says
+  // online-vs-offline; this label adds the path nuance. Hidden for offline /
+  // connecting — the dot speaks for those.
 
   let {
     kind,
     transport = null,
+    ipVersion = null,
+    origin = null,
     relayHost = "bootstrap1.y7v.lol",
   }: ConnectionLabelProps = $props();
 
-  const label = $derived(labelFor(kind, transport));
-  const tooltip = $derived(tooltipFor(kind, relayHost, transport));
+  const label = $derived(labelFor(kind, transport, ipVersion, origin));
+  const tooltip = $derived(tooltipFor(kind, relayHost, transport, origin));
   const tone = $derived(toneFor(kind));
 
   function baseLabel(k: ConnectionKind): string | null {
@@ -47,27 +61,44 @@
     }
   }
 
-  function labelFor(k: ConnectionKind, t: Transport | null): string | null {
+  function labelFor(
+    k: ConnectionKind,
+    t: Transport | null,
+    v: IpVersion | null,
+    o: ConnectionOrigin | null,
+  ): string | null {
     const base = baseLabel(k);
     if (base === null) return null;
-    return t === null ? base : `${base} · ${t.toUpperCase()}`;
+    const parts = [base];
+    if (t !== null) parts.push(t.toUpperCase());
+    const fam = ipFamilyLabel(v);
+    if (fam !== null) parts.push(fam);
+    const ot = originTag(o);
+    // Only surface the origin tag when the kind doesn't already imply it:
+    // RELAY already means relay_only; a DCUtR upgrade on a Direct line is
+    // the interesting case worth a "via DCUtR" tag.
+    if (ot !== null && o === "dcutr_upgrade") parts.push(ot);
+    return parts.join(" · ");
   }
 
   function tooltipFor(
     k: ConnectionKind,
     host: string,
     t: Transport | null,
+    o: ConnectionOrigin | null,
   ): string {
     const via = t === null ? "" : ` over ${t.toUpperCase()}`;
+    const how = originPhrase(o);
+    const howSuffix = how === null ? "" : ` — ${how}`;
     switch (k) {
       case "lan":
-        return `connected over LAN (mDNS-discovered)${via}`;
+        return `connected over LAN (mDNS-discovered)${via}${howSuffix}`;
       case "internet":
-        return `direct internet connection${via}`;
+        return `direct internet connection${via}${howSuffix}`;
       case "relayed":
         return `relayed via ${host}${via} — end-to-end encrypted, latency may be slightly higher`;
       case "direct":
-        return `direct p2p connection (hole-punched through bootstrap)${via}`;
+        return `direct p2p connection${via}${howSuffix}`;
       case "offline":
       case "connecting":
         return "";

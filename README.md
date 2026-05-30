@@ -218,9 +218,15 @@ Two peers across arbitrary NATs talk out of the box:
   (QUIC preferred — it's the path that enables UDP hole-punch).
 
 The chat header and the **connectivity O.O** pane show exactly how each
-peer is reached (`DIRECT · QUIC` / `RELAY · TCP`), the NAT verdict, and
-the DCUtR success rate; the bug icon by the logo copies a full
-diagnostics snapshot.
+peer is reached — the full path, not just "online": e.g.
+`DIRECT · QUIC · IPv6 · via DCUtR` (hole-punched off a relay) vs
+`RELAY · TCP`. Hover for a plain-English tooltip ("hole-punched from a
+relay to a direct path"). The pane adds the NAT verdict and the DCUtR
+success rate; the bug icon by the logo copies a full diagnostics snapshot
+that also includes a **connection-lineage ring** — the timestamped
+sequence of every path change per peer (`None→Relayed→Direct`,
+`Direct→Relayed` downgrades, `→Offline`) so a "it was fast, then went
+slow" report is debuggable after the fact.
 
 > **Field status (honest):** the relay / QUIC / direct paths are proven
 > on loopback and in a netns NAT simulation, and a QUIC relay

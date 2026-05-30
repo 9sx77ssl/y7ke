@@ -141,6 +141,12 @@ pub(crate) struct AppInner {
     /// Surfaces in the Connectivity debug pane via
     /// `list_active_connections`. Cleared by `ConnectionClosed`.
     pub connection_meta: tokio::sync::RwLock<HashMap<Y7Id, ConnectionMeta>>,
+    /// Bounded session lineage ring: each meaningful presence transition
+    /// (None→Relayed, Relayed→Direct via DCUtR, Direct→Relayed downgrade,
+    /// →Offline) recorded oldest→newest. Surfaced in the diagnostics export
+    /// so a "was direct, went slow" report shows the exact path evolution.
+    pub transition_ring:
+        tokio::sync::Mutex<std::collections::VecDeque<y7ke_core::TransportTransition>>,
 }
 
 /// Per-active-connection metadata exposed via the Connectivity pane.
@@ -214,6 +220,12 @@ pub fn extract_transport(addr: &libp2p::Multiaddr) -> Option<y7ke_core::Transpor
 /// DNS-only or relay-circuit address (no literal IP).
 pub fn extract_ip_version(addr: &libp2p::Multiaddr) -> Option<y7ke_core::IpVersion> {
     use libp2p::multiaddr::Protocol;
+    // A circuit (relayed) addr begins with the *relay's* IP — that family is
+    // the hop to the relay, NOT a direct path to the peer. Report None so the
+    // UI doesn't render "RELAY · IPv4" as if we reached the peer over v4.
+    if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+        return None;
+    }
     for p in addr.iter() {
         match p {
             Protocol::Ip4(_) => return Some(y7ke_core::IpVersion::V4),
@@ -314,6 +326,7 @@ impl AppHandle {
             kad_lookups: tokio::sync::Semaphore::new(KAD_LOOKUP_CONCURRENCY),
             syncing: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             connection_meta: tokio::sync::RwLock::new(HashMap::new()),
+            transition_ring: tokio::sync::Mutex::new(std::collections::VecDeque::new()),
         });
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -424,10 +437,16 @@ pub(crate) fn best_conn(
 /// `Offline` row — otherwise a `ConnectionClosed` arriving after a contact
 /// was deleted would resurrect a ghost presence entry (absence already
 /// reads as Offline via `unwrap_or` at the call sites).
+#[allow(clippy::type_complexity)]
 pub(crate) async fn refresh_presence(
     inner: &AppInner,
     y7: Y7Id,
-) -> (ConnectionKind, Option<y7ke_core::Transport>) {
+) -> (
+    ConnectionKind,
+    Option<y7ke_core::Transport>,
+    Option<y7ke_core::IpVersion>,
+    y7ke_core::ConnectionOrigin,
+) {
     let (best, meta) = {
         let conns = inner.connections.read().await;
         conns
@@ -436,6 +455,8 @@ pub(crate) async fn refresh_presence(
             .unwrap_or((ConnectionKind::Offline, ConnectionMeta::default()))
     };
     let transport = meta.transport;
+    let ip_version = meta.ip_version;
+    let origin = meta.origin;
     if matches!(best, ConnectionKind::Offline) {
         inner.presence.write().await.remove(&y7);
         inner.connection_meta.write().await.remove(&y7);
@@ -443,7 +464,49 @@ pub(crate) async fn refresh_presence(
         inner.presence.write().await.insert(y7, best);
         inner.connection_meta.write().await.insert(y7, meta);
     }
-    (best, transport)
+    (best, transport, ip_version, origin)
+}
+
+/// Max retained session transitions (lineage ring) — enough for a handful
+/// of peers each cycling relay→direct→relay across a session.
+const TRANSITION_RING: usize = 48;
+
+/// Append a presence transition to the bounded lineage ring, but only when
+/// it's a real change for this peer. Dedups the repeat
+/// `ConnectionEstablished` events that fire for a peer's relay + direct
+/// paths without changing the winning kind. `from` is derived from the last
+/// recorded `to` for this peer, so the ring reads as a per-peer chain
+/// (None→Relayed→Direct→…) when filtered by y7_id in the export.
+pub(crate) async fn record_transition(
+    inner: &AppInner,
+    y7: Y7Id,
+    to: ConnectionKind,
+    transport: Option<y7ke_core::Transport>,
+    ip_version: Option<y7ke_core::IpVersion>,
+    origin: y7ke_core::ConnectionOrigin,
+) {
+    let uri = y7.to_uri();
+    let mut ring = inner.transition_ring.lock().await;
+    let last = ring.iter().rev().find(|t| t.y7_id == uri);
+    if let Some(prev) = last {
+        // No real change — skip the noise from a duplicate established event.
+        if prev.to == to && prev.transport == transport && prev.origin == origin {
+            return;
+        }
+    }
+    let from = last.map(|t| t.to);
+    ring.push_back(y7ke_core::TransportTransition {
+        y7_id: uri,
+        from,
+        to,
+        transport,
+        ip_version,
+        origin,
+        at_ms: y7ke_storage::now_ms(),
+    });
+    while ring.len() > TRANSITION_RING {
+        ring.pop_front();
+    }
 }
 
 const PRESENCE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -604,7 +667,7 @@ async fn run_presence_ticker(
                                     }
                                 }
                             }
-                            let (best, transport) =
+                            let (best, transport, ip_version, origin) =
                                 crate::app::refresh_presence(&inner, c.y7_id).await;
                             tracing::info!(
                                 y7_id = %c.y7_id,
@@ -614,6 +677,8 @@ async fn run_presence_ticker(
                                 y7_id: c.y7_id.to_uri(),
                                 connection: best,
                                 transport,
+                                ip_version,
+                                origin,
                             });
                         }
                         Ok(true) => {
@@ -686,7 +751,7 @@ async fn run_presence_ticker(
                                     }
                                 }
                             }
-                            let (best, transport) =
+                            let (best, transport, ip_version, origin) =
                                 crate::app::refresh_presence(&inner, c.y7_id).await;
                             if matches!(best, ConnectionKind::Offline) {
                                 tracing::info!(
@@ -699,6 +764,8 @@ async fn run_presence_ticker(
                                 y7_id: c.y7_id.to_uri(),
                                 connection: best,
                                 transport,
+                                ip_version,
+                                origin,
                             });
                         }
                         Err(e) => {
@@ -804,6 +871,43 @@ mod tests {
         assert!(!should_attempt_upgrade(21));
         assert!(!should_attempt_upgrade(39));
         assert!(should_attempt_upgrade(40));
+    }
+
+    #[test]
+    fn ip_version_extraction_and_circuit_guard() {
+        use libp2p::multiaddr::Protocol;
+        use y7ke_core::IpVersion;
+        let v4: libp2p::Multiaddr = "/ip4/1.2.3.4/tcp/4001".parse().unwrap();
+        let v6: libp2p::Multiaddr = "/ip6/::1/udp/4001/quic-v1".parse().unwrap();
+        assert_eq!(extract_ip_version(&v4), Some(IpVersion::V4));
+        assert_eq!(extract_ip_version(&v6), Some(IpVersion::V6));
+        // A relayed (circuit) addr carries the relay's family — must read as
+        // None so the UI doesn't claim a direct v4/v6 path to the peer.
+        let circuit = v4.clone().with(Protocol::P2pCircuit);
+        assert_eq!(extract_ip_version(&circuit), None);
+        // No IP layer at all (e.g. a bare /dns) → None.
+        let dns: libp2p::Multiaddr = "/dns4/example.com/tcp/4001".parse().unwrap();
+        assert_eq!(extract_ip_version(&dns), None);
+    }
+
+    #[test]
+    fn origin_classification_by_kind_and_family() {
+        use libp2p::multiaddr::Protocol;
+        use y7ke_core::ConnectionOrigin as O;
+        let v4: libp2p::Multiaddr = "/ip4/1.2.3.4/tcp/4001".parse().unwrap();
+        let v6: libp2p::Multiaddr = "/ip6/2001:db8::1/udp/4001/quic-v1".parse().unwrap();
+        let circuit = v4.clone().with(Protocol::P2pCircuit);
+        // Relayed is always RelayOnly regardless of the relay's family.
+        assert_eq!(classify_origin(ConnectionKind::Relayed, &circuit), O::RelayOnly);
+        // Internet splits by family.
+        assert_eq!(classify_origin(ConnectionKind::Internet, &v6), O::PublicIpv6);
+        assert_eq!(classify_origin(ConnectionKind::Internet, &v4), O::PublicIpv4);
+        // LAN + post-DCUtR Direct both read as DirectDial here (the DCUtR
+        // relabel to DcutrUpgrade happens on the upgrade event, not in here).
+        assert_eq!(classify_origin(ConnectionKind::Lan, &v4), O::DirectDial);
+        assert_eq!(classify_origin(ConnectionKind::Direct, &v6), O::DirectDial);
+        // Transient / offline → Unknown.
+        assert_eq!(classify_origin(ConnectionKind::Offline, &v4), O::Unknown);
     }
 
     #[test]

@@ -11,11 +11,13 @@ pub mod netlog;
 pub mod settings;
 pub mod status;
 
-pub use diagnostics::{ConnectionView, DcutrStats, DiagnosticsDetail, NatDetail, RateLimitDrops};
-pub use netlog::Cat;
+pub use diagnostics::{
+    ConnectionView, DcutrStats, DiagnosticsDetail, NatDetail, RateLimitDrops, TransportTransition,
+};
 pub use error::{AppError, Result};
 pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};
+pub use netlog::Cat;
 pub use settings::{expand_bootstrap, BootstrapEntry, DialMode, Settings, DEFAULT_RELAY_BOOTSTRAP};
 pub use status::{
     ConnectionKind, ConnectionOrigin, ContactStatus, IpVersion, MessageStatus, NatReachability,

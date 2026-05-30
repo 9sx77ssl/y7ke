@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.25] — 2026-05-30
+
+- feat(observability): UI connection lineage + full provenance labels (Phases 3/4/6)
+
 ## [3.0.24] — 2026-05-30
 
 - docs: bootstrap sourcing (Settings+hardcoded only), IPv6 + provenance status

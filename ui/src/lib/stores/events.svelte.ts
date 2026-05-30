@@ -137,7 +137,13 @@ function dispatch(ev: AppEvent): void {
       applyMessageStatus(ev.message_id, ev.status as 0 | 1 | 2 | 3 | 4);
       break;
     case "presence_changed":
-      applyPresence(ev.y7_id, ev.connection, ev.transport);
+      applyPresence(
+        ev.y7_id,
+        ev.connection,
+        ev.transport,
+        ev.ip_version,
+        ev.origin,
+      );
       state.presenceRev += 1;
       break;
     case "settings_changed":

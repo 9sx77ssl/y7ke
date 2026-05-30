@@ -13,6 +13,8 @@
   import {
     getPresence,
     getTransport,
+    getIpFamily,
+    getOrigin,
     presenceLabel,
   } from "../lib/stores/presence.svelte";
   import { truncateY7Id } from "../lib/format";
@@ -23,7 +25,7 @@
   import MessageBubble from "../lib/components/MessageBubble.svelte";
   import StatusDot from "../lib/components/StatusDot.svelte";
   import Textarea from "../lib/components/Textarea.svelte";
-  import type { ConnectionKind } from "../lib/types";
+  import type { ConnectionKind, MessageStatus } from "../lib/types";
   import type { StatusTone } from "../lib/components/StatusDot.svelte";
 
   interface Props {
@@ -61,6 +63,8 @@
   const contact = $derived(findContact(peerY7Id));
   const presence = $derived(getPresence(peerY7Id));
   const transport = $derived(getTransport(peerY7Id));
+  const ipFamily = $derived(getIpFamily(peerY7Id));
+  const origin = $derived(getOrigin(peerY7Id));
   const displayName = $derived(
     contact?.nickname ?? truncateY7Id(peerY7Id, 10, 8),
   );
@@ -107,7 +111,7 @@
       <span class="name" title={contact?.nickname ?? peerY7Id}>
         {displayName}
       </span>
-      <ConnectionLabel kind={presence} {transport} />
+      <ConnectionLabel kind={presence} {transport} ipVersion={ipFamily} {origin} />
     </div>
     {#if hasNickname}
       <div class="head-right">
@@ -140,7 +144,7 @@
               text={msg.text}
               timestampMs={msg.timestamp_ms}
               isMine={msg.is_mine}
-              status={msg.status}
+              status={msg.status as MessageStatus}
             />
           </li>
         {/each}

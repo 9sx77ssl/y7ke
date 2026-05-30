@@ -427,6 +427,8 @@ impl AppHandle {
                     .copied()
                     .unwrap_or(y7ke_core::ConnectionKind::Offline),
                 transport: meta_map.get(&c.y7_id).and_then(|m| m.transport),
+                ip_version: meta_map.get(&c.y7_id).and_then(|m| m.ip_version),
+                origin: meta_map.get(&c.y7_id).map(|m| m.origin).unwrap_or_default(),
             })
             .collect())
     }

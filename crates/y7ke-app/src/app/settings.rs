@@ -51,8 +51,17 @@ impl AppHandle {
             .collect();
         let nat = *self.inner.nat_status.read().await;
         let probe = self.inner.nat_probe_detail.read().await.clone();
+        let recent_transitions = self
+            .inner
+            .transition_ring
+            .lock()
+            .await
+            .iter()
+            .cloned()
+            .collect();
         y7ke_core::DiagnosticsDetail {
             recent_dcutr_failures,
+            recent_transitions,
             rate_limit_drops: y7ke_core::RateLimitDrops {
                 handshake: self.inner.rl_drops_handshake.load(Relaxed),
                 msg: self.inner.rl_drops_msg.load(Relaxed),
@@ -133,12 +142,14 @@ impl AppHandle {
             // live LAN/Direct peer Offline in the UI until its next event.
             if let Ok(contacts) = self.inner.db.contacts().list().await {
                 for c in contacts {
-                    let (best, transport) =
+                    let (best, transport, ip_version, origin) =
                         crate::app::refresh_presence(&self.inner, c.y7_id).await;
                     let _ = self.event_tx.send(AppEvent::PresenceChanged {
                         y7_id: c.y7_id.to_uri(),
                         connection: best,
                         transport,
+                        ip_version,
+                        origin,
                     });
                 }
             }

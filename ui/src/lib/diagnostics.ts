@@ -15,6 +15,7 @@ import {
   listBootstraps,
 } from "./bridge";
 import type { ConnectionView } from "./gen/ConnectionView";
+import type { TransportTransition } from "./gen/TransportTransition";
 import { collectFrontendLog } from "./log";
 
 function transportLabel(c: ConnectionView): string {
@@ -25,6 +26,24 @@ function transportLabel(c: ConnectionView): string {
       : `${c.kind}${fam ? ` / ${fam}` : ""} / ${c.transport ? c.transport.toLowerCase() : "?"}`;
   // Origin = the "how did we get here?" axis (public_ipv6 / dcutr_upgrade / …).
   return c.origin && c.origin !== "unknown" ? `${base}  [${c.origin}]` : base;
+}
+
+/** One lineage-ring row: `HH:MM:SS  from→to  transport · ipfamily [origin]`. */
+function transitionLabel(t: TransportTransition): string {
+  let when = "??:??:??";
+  try {
+    when = new Date(Number(t.at_ms)).toISOString().slice(11, 19);
+  } catch {
+    /* best-effort */
+  }
+  const fam = t.ip_version === "v6" ? "ipv6" : t.ip_version === "v4" ? "ipv4" : null;
+  const arrow = `${t.from ?? "—"}→${t.to}`;
+  const extra = [t.transport ? t.transport.toLowerCase() : null, fam]
+    .filter(Boolean)
+    .join(" · ");
+  const tail = extra ? `  ${extra}` : "";
+  const org = t.origin && t.origin !== "unknown" ? `  [${t.origin}]` : "";
+  return `${when}  ${arrow}${tail}${org}`;
 }
 
 /** Friendly dial-mode label (matches the Connectivity pane wording). */
@@ -100,6 +119,12 @@ export async function buildDiagnostics(): Promise<string> {
     L.push(
       `  ${c.y7_id}  ${transportLabel(c)}${c.via_host ? `  via ${c.via_host}` : ""}`,
     );
+  }
+  L.push("");
+  const trans = detail.recent_transitions;
+  L.push(`connection lineage (${trans.length}):`);
+  for (const t of trans) {
+    L.push(`  ${t.y7_id}  ${transitionLabel(t)}`);
   }
   L.push("");
   L.push("--- ui log ---");

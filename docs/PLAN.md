@@ -10,19 +10,24 @@
 encrypted text over libp2p, local-first SQLite, no accounts, no servers
 that can read your messages.
 
-**Status banner (as of 3.0.23, 2026-05-30).** LAN + offline-sync +
+**Status banner (as of 3.0.25, 2026-05-30).** LAN + offline-sync +
 relay-fallback are PROVEN on real sockets (loopback / mDNS on one host).
 Cross-NAT **direct QUIC hole-punch is NOT field-confirmed** — proven only
 on loopback (and there over a TCP relay) and in a netns sim that by design
 falls back to relay (issue #91). Track B crypto uplift (Double Ratchet,
 OS keyring, replay nonce) is **not started**. **Connection provenance**
 (`origin`/`ip_version`) + structured `cat=` lifecycle logging are PROVEN
-(code + ts-rs + tests). **IPv6**: the client now binds `/ip6/::` best-effort
-(TCP+QUIC) and `::1` direct dial is PROVEN by test; all dial/discovery/relay
-paths are IP-family-agnostic; but real cross-host v6 is UNVERIFIED — gated on
-the bootstrap publishing an AAAA + opening its v6 firewall (ops, not code).
-Bootstraps are sourced ONLY from the in-app Settings page + one hardcoded
-default (env var + config-file sources removed).
+(code + ts-rs + tests). The provenance is now surfaced **end-to-end in the
+UI**: the chat header renders the full path ("DIRECT · QUIC · IPv6 · via
+DCUtR"), `ContactView` + `PresenceChanged` carry `ip_version`/`origin`, and
+the diagnostics export carries a bounded **connection-lineage ring**
+(None→Relayed→Direct, downgrades, →Offline with timestamps). **IPv6**: the
+client now binds `/ip6/::` best-effort (TCP+QUIC) and `::1` direct dial is
+PROVEN by test; all dial/discovery/relay paths are IP-family-agnostic; but
+real cross-host v6 is UNVERIFIED — gated on the bootstrap publishing an AAAA
++ opening its v6 firewall (ops, not code). Bootstraps are sourced ONLY from
+the in-app Settings page + one hardcoded default (env var + config-file
+sources removed).
 
 ---
 
@@ -85,6 +90,7 @@ intentionally with zero `y7ke-*` deps so it can never decrypt traffic.
 | V2 hardening | v0.1.65→v0.1.101 | DCUtR counters + Connectivity pane, idempotent dials, fail-closed block enforcement, netns NAT-sim harness, live-smoke runbook, copy-diagnostics export, two-mode dial (migration 0006), transport-agnostic bootstrap shorthand |
 | **3.0.0 — global networking** | `4f33a7a` (2026-05-29) | rolls up A1–A6 |
 | **3.0.x hardening** | 3.0.1→3.0.16 | frameless first-paint fix (3.0.1/02/08), donate page (3.0.3-05), contact-request fix (3.0.9), HMR teardown (3.0.10), auto-reconnect (3.0.11), dev full-reload (3.0.12), **reliable message delivery (3.0.13)**, **durable ChatDeleted + migration 0007 (3.0.14)**, **boot-$effect listener-flap fix (3.0.15)**, **presence re-establish on delete+re-add + dial-mode hydration (3.0.16)** |
+| **3.0.x observability** | 3.0.17→3.0.25 | structured `cat=` lifecycle logging (3.0.20), connection provenance `origin`/`ip_version` end-to-end (3.0.21), best-effort IPv6 listeners + `/dns` shorthand + `::1` proof (3.0.22), bootstraps from Settings + one hardcoded node only (3.0.23), **richer chat-header label (DIRECT·QUIC·IPv6·via DCUtR) + ContactView provenance (Phase 4)**, **connection-lineage ring in diagnostics export (Phase 3)** |
 
 ---
 
@@ -165,7 +171,8 @@ the `/y7ke/msg` wire ciphertext. `PRAGMA secure_delete = ON`.
 | QUIC listener bind | **PROVEN** | `quic_listen_smoke.rs` (loopback) |
 | QUIC as live peer data transport | **SIMULATED** | only `quic_migrate_node` netns, no committed log |
 | Transport preference sort (QUIC>TCP>relay) | **PROVEN** | `dial_priority.rs` unit tests |
-| Transport surfacing (label DIRECT·QUIC) | **PROVEN (code)** / **UNVERIFIED (test)** | wired end-to-end; no automated assertion |
+| Transport surfacing (label DIRECT·QUIC·IPv6·via DCUtR) | **PROVEN (code)** / **UNVERIFIED (test)** | wired end-to-end (chat header + Connectivity pane); `ContactView`+`PresenceChanged` carry `ip_version`/`origin`; no automated render assertion |
+| Connection-lineage ring (diagnostics export) | **PROVEN** | bounded `transition_ring` recorded at the 3 connection arms; surfaced as `DiagnosticsDetail.recent_transitions` + ts-rs; rendered in copy-diagnostics |
 | DCUtR relay→direct upgrade *event* | **SIMULATED** | `v2_dcutr_smoke.rs` (loopback, TCP relay) |
 | DCUtR upgrade logged (success + failure) | **PROVEN** | `swarm.rs` netlog `cat=DCUTR`, `event_loop.rs` relay→direct `elapsed_ms` |
 | Connection provenance (`origin`/`ip_version`) | **PROVEN** | `ConnectionOrigin {DirectDial,DcutrUpgrade,RelayOnly,PublicIpv6,PublicIpv4,Unknown}` + ts-rs; surfaced in logs+diagnostics+pane; unit tests |
@@ -209,18 +216,20 @@ the `/y7ke/msg` wire ciphertext. `PRAGMA secure_delete = ON`.
 rate-limit, non-blocking boot), D1 (ts-rs), Settings UI + two-mode dial,
 all 3.0.x hardening.
 
+**Done (observability track, 3.0.20→3.0.25):**
+1. ~~**Structured lifecycle logging**~~ — `cat=` category field
+   (DISCOVERY/TRANSPORT/DCUTR/RELAY/CONNECTION/IPVERSION/AUTONAT) + time-to-
+   direct `elapsed_ms` + derived direct→relay downgrade log. *(netlog! over
+   existing tracing; no new subscriber)*
+2. ~~**Richer connection labels**~~ — `ip_version` + `origin`
+   (`ConnectionOrigin`) captured end-to-end; chat header renders
+   "DIRECT · QUIC · IPv6 · via DCUtR"; Connectivity pane shows per-conn
+   detail; diagnostics export carries the connection-lineage ring.
+3. ~~**IPv6 enablement**~~ — client `/ip6/::` best-effort listeners
+   (TCP+QUIC); `/dns` default descriptor; loopback `::1` proof test. Bootstrap
+   AAAA + v6 firewall remains ops-gated (separate repo + DNS).
+
 **Remaining (proposed order):**
-1. **Structured lifecycle logging** — `cat=` category field
-   (DISCOVERY/TRANSPORT/DCUTR/RELAY/CONNECTION/IPVERSION) + net↔app
-   correlation key + time-to-direct `elapsed_ms`. Low effort, unblocks #91
-   triage. *(reuse existing tracing; no new subscriber)*
-2. **Richer connection labels** — capture IP version (currently dropped),
-   DCUtR lineage flag, direct→relay downgrade signal. Med effort, UI
-   debug-pane only.
-3. **IPv6 enablement** — client `/ip6/::` best-effort listeners
-   (`swarm.rs:53-58,133/145`); bootstrap AAAA + ip6 firewall + `/dns6`
-   external-addr (separate repo + DNS); `/dns` default descriptor; a
-   loopback `::1` proof test.
 4. **Live cross-NAT smoke (#91)** — run the LIVE_SMOKE procedure on two
    real machines / two ISPs; commit a redacted captured log. This is the
    ONE artifact that flips cross-NAT direct QUIC from SIMULATED to PROVEN.
@@ -263,7 +272,8 @@ direct QUIC stays SIMULATED.
   online chat-delete + durable-stash invariant, byte-level privacy, block
   enforcement, QUIC bind, transport-preference sort, DCUtR logging,
   connection provenance (`origin`/`ip_version` + ts-rs + unit tests),
-  structured `cat=` lifecycle logging, IPv6 client listen + `::1` direct dial.
+  connection-lineage ring in the diagnostics export, structured `cat=`
+  lifecycle logging, IPv6 client listen + `::1` direct dial.
 - **SIMULATED (loopback / netns only):** relay round-trip, DCUtR
   relay→direct upgrade (loopback, TCP relay), QUIC as data transport,
   AutoNAT plumbing, the full relay→direct chain, cross-NAT QUIC hole-punch.

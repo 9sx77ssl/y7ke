@@ -51,6 +51,32 @@ pub struct ConnectionView {
     pub origin: ConnectionOrigin,
 }
 
+/// One recorded connection-state transition for a peer — the lineage ring.
+/// A snapshot says what a connection IS *now*; this says how it GOT there
+/// over the session (None→Relayed→Direct via DCUtR, or a Direct→Relayed
+/// downgrade after a path drop). The single most useful artifact when a
+/// user reports "it was direct, then went slow": the export shows the exact
+/// sequence and timing without reproducing the session.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
+pub struct TransportTransition {
+    /// `y7:` URI of the peer this transition is about.
+    pub y7_id: String,
+    /// Connection kind BEFORE the transition. `None` for the first connect.
+    pub from: Option<ConnectionKind>,
+    /// Connection kind AFTER the transition.
+    pub to: ConnectionKind,
+    /// Transport of the new winning connection (QUIC / TCP), if known.
+    pub transport: Option<Transport>,
+    /// IP family of the new winning connection (v4 / v6), if known.
+    pub ip_version: Option<IpVersion>,
+    /// HOW the new connection was established.
+    pub origin: ConnectionOrigin,
+    /// Wall-clock ms when recorded — lets the export order + age transitions.
+    #[ts(type = "number")]
+    pub at_ms: i64,
+}
+
 /// Extra debug signal that doesn't fit the compact always-on UI but is
 /// load-bearing in the copy-diagnostics export — the only debug surface a
 /// non-technical user can reach. Built on-demand; no persistence.
@@ -62,6 +88,9 @@ pub struct DiagnosticsDetail {
     /// (symmetric NAT / timeout / no observed addr) — the key to triaging
     /// a pair that never upgrades from Relayed to Direct.
     pub recent_dcutr_failures: Vec<String>,
+    /// Connection-state lineage across the session (oldest → newest), the
+    /// "how did each peer's path evolve?" axis. Bounded ring.
+    pub recent_transitions: Vec<TransportTransition>,
     /// Inbound RPCs refused by the rate limiter since boot, per protocol.
     /// Surfaces an otherwise-silent drop storm (reconnect storm / hostile
     /// peer exhausting a bucket) that would make "active connections" look

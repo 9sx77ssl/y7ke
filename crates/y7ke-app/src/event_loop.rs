@@ -109,10 +109,7 @@ async fn dispatch(
                         // don't let it overwrite the hole-punch provenance).
                         .and_modify(|e| {
                             e.kind = kind;
-                            if matches!(
-                                e.meta.origin,
-                                y7ke_core::ConnectionOrigin::DcutrUpgrade
-                            ) {
+                            if matches!(e.meta.origin, y7ke_core::ConnectionOrigin::DcutrUpgrade) {
                                 e.meta.via_host = new_meta.via_host.clone();
                                 e.meta.transport = new_meta.transport;
                                 e.meta.ip_version = new_meta.ip_version;
@@ -126,16 +123,20 @@ async fn dispatch(
                             opened_at: std::time::Instant::now(),
                         });
                 }
-                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
+                let (best, transport, ip_version, origin) =
+                    crate::app::refresh_presence(inner, y7).await;
                 // Peer is reachable again — drop its reconnect backoff so
                 // a future disconnect retries immediately rather than
                 // inheriting a stale long cooldown.
                 inner.reconnect_backoff.write().await.remove(&y7);
                 y7ke_core::netlog!(info, y7ke_core::Cat::Connection, %y7, ?best, ?transport, origin = ?new_meta.origin, ip = ?new_meta.ip_version, ?connection_id, "presence: established");
+                crate::app::record_transition(inner, y7, best, transport, ip_version, origin).await;
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
                     transport,
+                    ip_version,
+                    origin,
                 });
                 drain_queue_for_peer(inner, event_tx, &y7, peer, false).await?;
                 flush_pending_delete(inner, &y7, peer).await?;
@@ -176,22 +177,28 @@ async fn dispatch(
                         .filter(|e| matches!(e.kind, y7ke_core::ConnectionKind::Relayed))
                         .map(|e| e.opened_at.elapsed().as_millis() as u64)
                         .max();
-                    let e = by_id.entry(connection_id).or_insert_with(|| crate::app::ConnEntry {
-                        kind,
-                        meta: crate::app::ConnectionMeta::default(),
-                        opened_at: std::time::Instant::now(),
-                    });
+                    let e = by_id
+                        .entry(connection_id)
+                        .or_insert_with(|| crate::app::ConnEntry {
+                            kind,
+                            meta: crate::app::ConnectionMeta::default(),
+                            opened_at: std::time::Instant::now(),
+                        });
                     e.kind = kind;
                     // Stamp the hole-punch provenance — survives a later
                     // ConnectionEstablished for this same id (guarded there).
                     e.meta.origin = y7ke_core::ConnectionOrigin::DcutrUpgrade;
                 }
-                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
+                let (best, transport, ip_version, origin) =
+                    crate::app::refresh_presence(inner, y7).await;
                 y7ke_core::netlog!(info, y7ke_core::Cat::Dcutr, %y7, ?kind, ?best, ?transport, elapsed_ms = relay_to_direct_ms, origin = "dcutr_upgrade", "relay->direct upgrade (presence)");
+                crate::app::record_transition(inner, y7, best, transport, ip_version, origin).await;
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
                     transport,
+                    ip_version,
+                    origin,
                 });
                 // The relay→direct swap can strand a request-response message
                 // that libp2p pinned to the now-folded relayed connection
@@ -258,7 +265,8 @@ async fn dispatch(
                 if fully_gone {
                     inner.rate_limiter.forget(peer).await;
                 }
-                let (best, transport) = crate::app::refresh_presence(inner, y7).await;
+                let (best, transport, ip_version, origin) =
+                    crate::app::refresh_presence(inner, y7).await;
                 // Derived (app-side reconstruction, not a libp2p primitive):
                 // a direct/internet/lan path closing while a relay survivor is
                 // now best = a direct→relay downgrade.
@@ -275,10 +283,13 @@ async fn dispatch(
                 } else {
                     y7ke_core::netlog!(debug, y7ke_core::Cat::Connection, %y7, ?best, ?transport, ?connection_id, "closed -> presence recomputed");
                 }
+                crate::app::record_transition(inner, y7, best, transport, ip_version, origin).await;
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
                     transport,
+                    ip_version,
+                    origin,
                 });
             } else {
                 tracing::debug!(%peer, "connection closed for non-Ed25519 peer");

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use y7ke_core::{ConnectionKind, ContactStatus, Transport};
+use y7ke_core::{ConnectionKind, ConnectionOrigin, ContactStatus, IpVersion, Transport};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -17,6 +17,10 @@ pub struct ContactView {
     pub presence: ConnectionKind,
     /// Transport of the live connection (QUIC / TCP), `None` when offline.
     pub transport: Option<Transport>,
+    /// IP family of the live connection (v4 / v6), `None` for relay / offline.
+    pub ip_version: Option<IpVersion>,
+    /// HOW the live connection was established (direct dial / DCUtR / relay / …).
+    pub origin: ConnectionOrigin,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

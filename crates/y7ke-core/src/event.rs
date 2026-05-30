@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::id::ConversationId;
-use crate::status::{ConnectionKind, MessageStatus, NatReachability, RequestResolution, Transport};
+use crate::status::{
+    ConnectionKind, ConnectionOrigin, IpVersion, MessageStatus, NatReachability, RequestResolution,
+    Transport,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -60,6 +63,10 @@ pub enum AppEvent {
         y7_id: String,
         connection: ConnectionKind,
         transport: Option<Transport>,
+        /// IP family of the live connection (None for relay / DNS-only).
+        ip_version: Option<IpVersion>,
+        /// HOW the connection was established (the "how did we get here?" axis).
+        origin: ConnectionOrigin,
     },
 
     /// User settings (dial modes / bootstrap list) were updated.
