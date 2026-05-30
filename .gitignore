@@ -60,3 +60,7 @@ perf.data*
 
 # Nested but INDEPENDENT repo — never tracked by y7ke (separate git history + remote).
 /y7ke-bootstrap/
+
+# Local-only mold linker speedup — NOT committed (CI runners lack mold; would
+# break the release link step). Install mold + keep this file for fast local builds.
+/.cargo/config.toml
