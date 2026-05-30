@@ -18,9 +18,13 @@ import type { ConnectionView } from "./gen/ConnectionView";
 import { collectFrontendLog } from "./log";
 
 function transportLabel(c: ConnectionView): string {
-  if (c.kind === "relayed") return "relayed";
-  const t = c.transport ? c.transport.toLowerCase() : "?";
-  return `${c.kind} / ${t}`;
+  const fam = c.ip_version === "v6" ? "ipv6" : c.ip_version === "v4" ? "ipv4" : null;
+  const base =
+    c.kind === "relayed"
+      ? "relayed"
+      : `${c.kind}${fam ? ` / ${fam}` : ""} / ${c.transport ? c.transport.toLowerCase() : "?"}`;
+  // Origin = the "how did we get here?" axis (public_ipv6 / dcutr_upgrade / …).
+  return c.origin && c.origin !== "unknown" ? `${base}  [${c.origin}]` : base;
 }
 
 /** Friendly dial-mode label (matches the Connectivity pane wording). */

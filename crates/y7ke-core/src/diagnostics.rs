@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::status::{ConnectionKind, NatReachability, Transport};
+use crate::status::{ConnectionKind, ConnectionOrigin, IpVersion, NatReachability, Transport};
 
 /// Aggregate DCUtR upgrade counters since the AppHandle booted.
 ///
@@ -45,6 +45,10 @@ pub struct ConnectionView {
     /// Underlying transport. `None` when no current connection (e.g.
     /// Offline) or when the multiaddr couldn't be parsed.
     pub transport: Option<Transport>,
+    /// IP family of the remote endpoint. `None` for relay / DNS-only.
+    pub ip_version: Option<IpVersion>,
+    /// HOW the connection was established (the "how did we get here?" axis).
+    pub origin: ConnectionOrigin,
 }
 
 /// Extra debug signal that doesn't fit the compact always-on UI but is

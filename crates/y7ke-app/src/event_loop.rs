@@ -91,26 +91,47 @@ async fn dispatch(
                 // several at once (LAN + relay, or relay + the new
                 // direct path mid-DCUtR-upgrade); keying by ConnectionId
                 // means a later close removes only the one that died.
-                let entry = crate::app::ConnEntry {
-                    kind,
-                    meta: crate::app::ConnectionMeta {
-                        via_host: crate::app::extract_relay_via_host(&endpoint_addr),
-                        transport: crate::app::extract_transport(&endpoint_addr),
-                    },
+                let new_meta = crate::app::ConnectionMeta {
+                    via_host: crate::app::extract_relay_via_host(&endpoint_addr),
+                    transport: crate::app::extract_transport(&endpoint_addr),
+                    ip_version: crate::app::extract_ip_version(&endpoint_addr),
+                    origin: crate::app::classify_origin(kind, &endpoint_addr),
                 };
-                inner
-                    .connections
-                    .write()
-                    .await
-                    .entry(y7)
-                    .or_default()
-                    .insert(connection_id, entry);
+                {
+                    let mut conns = inner.connections.write().await;
+                    conns
+                        .entry(y7)
+                        .or_default()
+                        .entry(connection_id)
+                        // Preserve a DcutrUpgrade origin if the upgrade event
+                        // landed BEFORE this established arm (the upgrade fires
+                        // its own ConnectionEstablished, classified Internet —
+                        // don't let it overwrite the hole-punch provenance).
+                        .and_modify(|e| {
+                            e.kind = kind;
+                            if matches!(
+                                e.meta.origin,
+                                y7ke_core::ConnectionOrigin::DcutrUpgrade
+                            ) {
+                                e.meta.via_host = new_meta.via_host.clone();
+                                e.meta.transport = new_meta.transport;
+                                e.meta.ip_version = new_meta.ip_version;
+                            } else {
+                                e.meta = new_meta.clone();
+                            }
+                        })
+                        .or_insert_with(|| crate::app::ConnEntry {
+                            kind,
+                            meta: new_meta.clone(),
+                            opened_at: std::time::Instant::now(),
+                        });
+                }
                 let (best, transport) = crate::app::refresh_presence(inner, y7).await;
                 // Peer is reachable again — drop its reconnect backoff so
                 // a future disconnect retries immediately rather than
                 // inheriting a stale long cooldown.
                 inner.reconnect_backoff.write().await.remove(&y7);
-                tracing::info!(%y7, ?best, ?transport, "presence: connection established");
+                y7ke_core::netlog!(info, y7ke_core::Cat::Connection, %y7, ?best, ?transport, origin = ?new_meta.origin, ip = ?new_meta.ip_version, ?connection_id, "presence: established");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
@@ -144,20 +165,29 @@ async fn dispatch(
                 // this peer so the next relay reconnection (e.g. after
                 // suspend/resume) gets another full retry budget.
                 inner.upgrade_backoff.write().await.remove(&y7);
+                let relay_to_direct_ms;
                 {
                     let mut conns = inner.connections.write().await;
-                    conns
-                        .entry(y7)
-                        .or_default()
-                        .entry(connection_id)
-                        .or_insert_with(|| crate::app::ConnEntry {
-                            kind,
-                            meta: crate::app::ConnectionMeta::default(),
-                        })
-                        .kind = kind;
+                    let by_id = conns.entry(y7).or_default();
+                    // Time from the earliest still-open relayed path to this
+                    // upgrade (relay-open → direct), computed BEFORE relabel.
+                    relay_to_direct_ms = by_id
+                        .values()
+                        .filter(|e| matches!(e.kind, y7ke_core::ConnectionKind::Relayed))
+                        .map(|e| e.opened_at.elapsed().as_millis() as u64)
+                        .max();
+                    let e = by_id.entry(connection_id).or_insert_with(|| crate::app::ConnEntry {
+                        kind,
+                        meta: crate::app::ConnectionMeta::default(),
+                        opened_at: std::time::Instant::now(),
+                    });
+                    e.kind = kind;
+                    // Stamp the hole-punch provenance — survives a later
+                    // ConnectionEstablished for this same id (guarded there).
+                    e.meta.origin = y7ke_core::ConnectionOrigin::DcutrUpgrade;
                 }
                 let (best, transport) = crate::app::refresh_presence(inner, y7).await;
-                tracing::info!(%y7, ?kind, ?best, ?transport, "presence upgraded via DCUtR");
+                y7ke_core::netlog!(info, y7ke_core::Cat::Dcutr, %y7, ?kind, ?best, ?transport, elapsed_ms = relay_to_direct_ms, origin = "dcutr_upgrade", "relay->direct upgrade (presence)");
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,
@@ -198,9 +228,13 @@ async fn dispatch(
                 // Remove only the connection that closed, then recompute
                 // presence from any survivors. A relay circuit dropping
                 // must never blank a still-live LAN/direct path.
+                let mut closed_kind = None;
                 let fully_gone = {
                     let mut conns = inner.connections.write().await;
                     if let Some(by_id) = conns.get_mut(&y7) {
+                        // Capture the closed connection's kind BEFORE removing
+                        // it — needed to detect a direct→relay downgrade.
+                        closed_kind = by_id.get(&connection_id).map(|e| e.kind);
                         by_id.remove(&connection_id);
                         if by_id.is_empty() {
                             conns.remove(&y7);
@@ -225,7 +259,22 @@ async fn dispatch(
                     inner.rate_limiter.forget(peer).await;
                 }
                 let (best, transport) = crate::app::refresh_presence(inner, y7).await;
-                tracing::debug!(%y7, ?best, ?transport, "connection closed → presence recomputed");
+                // Derived (app-side reconstruction, not a libp2p primitive):
+                // a direct/internet/lan path closing while a relay survivor is
+                // now best = a direct→relay downgrade.
+                if matches!(
+                    closed_kind,
+                    Some(
+                        y7ke_core::ConnectionKind::Direct
+                            | y7ke_core::ConnectionKind::Internet
+                            | y7ke_core::ConnectionKind::Lan
+                    )
+                ) && matches!(best, y7ke_core::ConnectionKind::Relayed)
+                {
+                    y7ke_core::netlog!(info, y7ke_core::Cat::Connection, %y7, prev = ?closed_kind, now = ?best, "direct->relay downgrade (derived)");
+                } else {
+                    y7ke_core::netlog!(debug, y7ke_core::Cat::Connection, %y7, ?best, ?transport, ?connection_id, "closed -> presence recomputed");
+                }
                 let _ = event_tx.send(AppEvent::PresenceChanged {
                     y7_id: y7.to_uri(),
                     connection: best,

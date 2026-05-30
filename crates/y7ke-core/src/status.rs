@@ -88,6 +88,39 @@ pub enum Transport {
     Quic,
 }
 
+/// IP family of a connection's remote endpoint. Diagnostic only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+/// HOW a connection was established — the "how did we get here?" axis,
+/// distinct from `ConnectionKind` ("what is it now?"). Set once on
+/// `ConnectionEstablished`, relabelled `DcutrUpgrade` on a DCUtR hole-punch.
+/// Lets diagnostics, months later, distinguish a Direct connection that came
+/// from public-IPv6 reachability vs a hole-punch vs public-IPv4 dialing vs a
+/// relay-only fallback — without reproducing the session.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../ui/src/lib/gen/")]
+pub enum ConnectionOrigin {
+    /// Direct dial to a LAN/private or DNS-only (family-unknown) endpoint.
+    DirectDial,
+    /// Became direct via a DCUtR hole-punch (relay → direct).
+    DcutrUpgrade,
+    /// Still relayed; never reached a direct path.
+    RelayOnly,
+    /// Direct over a global IPv6 address (NAT bypassed via IPv6).
+    PublicIpv6,
+    /// Direct over a public IPv4 address (reachable public endpoint).
+    PublicIpv4,
+    #[default]
+    Unknown,
+}
+
 /// State of a pending contact request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

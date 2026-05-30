@@ -18,5 +18,6 @@ pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};
 pub use settings::{expand_bootstrap, BootstrapEntry, DialMode, Settings, DEFAULT_RELAY_BOOTSTRAP};
 pub use status::{
-    ConnectionKind, ContactStatus, MessageStatus, NatReachability, RequestResolution, Transport,
+    ConnectionKind, ConnectionOrigin, ContactStatus, IpVersion, MessageStatus, NatReachability,
+    RequestResolution, Transport,
 };

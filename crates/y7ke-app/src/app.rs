@@ -151,6 +151,12 @@ pub struct ConnectionMeta {
     pub via_host: Option<String>,
     /// Underlying transport (TCP or QUIC) extracted from the multiaddr.
     pub transport: Option<y7ke_core::Transport>,
+    /// IP family of the remote endpoint (None for relay / DNS-only).
+    pub ip_version: Option<y7ke_core::IpVersion>,
+    /// HOW this connection was established — set on `ConnectionEstablished`,
+    /// relabelled `DcutrUpgrade` on a DCUtR hole-punch. The "how did we get
+    /// here?" axis surfaced in diagnostics + the Connectivity pane.
+    pub origin: y7ke_core::ConnectionOrigin,
 }
 
 /// One live libp2p connection's facts, stored in `AppInner::connections`
@@ -161,6 +167,9 @@ pub struct ConnectionMeta {
 pub struct ConnEntry {
     pub kind: ConnectionKind,
     pub meta: ConnectionMeta,
+    /// When this connection was first recorded — basis for the relay→direct
+    /// `elapsed_ms`. `Instant` has no `Default`, so every constructor sets it.
+    pub opened_at: std::time::Instant,
 }
 
 /// Extract the host segment (e.g. `bootstrap1.y7v.lol`) from a relayed
@@ -199,6 +208,42 @@ pub fn extract_transport(addr: &libp2p::Multiaddr) -> Option<y7ke_core::Transpor
         }
     }
     None
+}
+
+/// IP family (V4/V6) of a multiaddr's first IP component; `None` for a
+/// DNS-only or relay-circuit address (no literal IP).
+pub fn extract_ip_version(addr: &libp2p::Multiaddr) -> Option<y7ke_core::IpVersion> {
+    use libp2p::multiaddr::Protocol;
+    for p in addr.iter() {
+        match p {
+            Protocol::Ip4(_) => return Some(y7ke_core::IpVersion::V4),
+            Protocol::Ip6(_) => return Some(y7ke_core::IpVersion::V6),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Classify HOW a freshly-established connection was reached, from its kind
+/// and endpoint. `Internet` (a public, non-RFC1918 endpoint per
+/// `connection_kind_for`) splits into PublicIpv6 / PublicIpv4 by family; a
+/// DCUtR hole-punch is stamped `DcutrUpgrade` separately on the upgrade
+/// event (not here). This is the "how did we get here?" provenance.
+pub fn classify_origin(
+    kind: ConnectionKind,
+    addr: &libp2p::Multiaddr,
+) -> y7ke_core::ConnectionOrigin {
+    use y7ke_core::{ConnectionOrigin as O, IpVersion};
+    match kind {
+        ConnectionKind::Relayed => O::RelayOnly,
+        ConnectionKind::Internet => match extract_ip_version(addr) {
+            Some(IpVersion::V6) => O::PublicIpv6,
+            Some(IpVersion::V4) => O::PublicIpv4,
+            None => O::DirectDial,
+        },
+        ConnectionKind::Lan | ConnectionKind::Direct => O::DirectDial,
+        ConnectionKind::Connecting | ConnectionKind::Offline => O::Unknown,
+    }
 }
 
 /// Aggregate state derived from AutoNAT v2 probe results.
@@ -719,6 +764,7 @@ mod tests {
         ConnEntry {
             kind,
             meta: ConnectionMeta::default(),
+            opened_at: std::time::Instant::now(),
         }
     }
 

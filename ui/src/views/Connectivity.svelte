@@ -134,9 +134,22 @@
     }
   }
 
-  function transportLabel(t: ConnectionView["transport"]): string {
-    if (t === null) return "—";
-    return t.toUpperCase();
+  // Compact "how did we get here?" detail: transport · ip family · origin.
+  // e.g. "quic · ipv4 · via dcutr", "quic · ipv6 · public ipv6", "quic · relay".
+  function detailLabel(c: ConnectionView): string {
+    const t = c.transport ? c.transport.toLowerCase() : "?";
+    const fam = c.ip_version === "v6" ? "ipv6" : c.ip_version === "v4" ? "ipv4" : null;
+    const how =
+      c.origin === "dcutr_upgrade"
+        ? "via dcutr"
+        : c.origin === "public_ipv6"
+          ? "public ipv6"
+          : c.origin === "public_ipv4"
+            ? "public ipv4"
+            : c.origin === "relay_only"
+              ? "relay"
+              : null;
+    return [t, fam, how].filter((x) => x !== null).join(" · ");
   }
 
   function truncateY7(y7: string): string {
@@ -240,7 +253,7 @@
               <span class="pill tone-{kindTone(c.kind)}">
                 {kindLabel(c.kind)}
               </span>
-              <span class="pill tone-muted">{transportLabel(c.transport)}</span>
+              <span class="pill tone-muted">{detailLabel(c)}</span>
             </li>
           {/each}
         </ul>

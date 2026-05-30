@@ -99,6 +99,8 @@ impl AppHandle {
                     kind: *kind,
                     via_host: m.via_host,
                     transport: m.transport,
+                    ip_version: m.ip_version,
+                    origin: m.origin,
                 }
             })
             .collect()
