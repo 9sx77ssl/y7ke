@@ -28,6 +28,7 @@ use libp2p::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
+use y7ke_core::Cat;
 
 use y7ke_core::settings::DialMode;
 use y7ke_core::{AppError, ConnectionKind, Y7Id};
@@ -692,7 +693,7 @@ async fn handle_swarm_event(
             let addr = endpoint.get_remote_address().clone();
             state.remember_address(peer_id, addr.clone());
             let kind = connection_kind_for(&endpoint);
-            info!(%peer_id, %addr, ?kind, ?connection_id, "connection established");
+            y7ke_core::netlog!(info, Cat::Connection, %peer_id, %addr, ?kind, ?connection_id, ip = ip_version_str(&addr), "established");
             emit(
                 event_tx,
                 NetEvent::ConnectionEstablished {
@@ -745,7 +746,7 @@ async fn handle_swarm_event(
             cause,
             ..
         } => {
-            info!(%peer_id, ?cause, ?connection_id, "connection closed");
+            y7ke_core::netlog!(info, Cat::Connection, %peer_id, ?cause, ?connection_id, "lost");
             // Bootstrap dropped — clear the relay-reservation guard so
             // the next reconnect re-runs `listen_on(<addr>/p2p-circuit)`.
             if state.bootstrap_peers.contains_key(&peer_id) {
@@ -849,7 +850,7 @@ async fn handle_swarm_event(
 fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
     match event.result {
         Ok(conn_id) => {
-            info!(peer = %event.remote_peer_id, ?conn_id, "dcutr: direct upgrade succeeded");
+            y7ke_core::netlog!(info, Cat::Dcutr, peer = %event.remote_peer_id, ?conn_id, "direct upgrade succeeded");
             emit(
                 event_tx,
                 NetEvent::ConnectionUpgraded {
@@ -860,7 +861,7 @@ fn handle_dcutr(event_tx: &broadcast::Sender<NetEvent>, event: dcutr::Event) {
             );
         }
         Err(e) => {
-            info!(peer = %event.remote_peer_id, error = %e, "dcutr: direct upgrade failed (staying on relay)");
+            y7ke_core::netlog!(info, Cat::Dcutr, peer = %event.remote_peer_id, error = %e, "direct upgrade failed (staying on relay)");
             emit(
                 event_tx,
                 NetEvent::ConnectionUpgradeFailed {
@@ -887,12 +888,14 @@ fn handle_autonat(
     } else {
         "unreachable"
     };
-    info!(
+    y7ke_core::netlog!(
+        debug,
+        Cat::Autonat,
         peer = %event.server,
         addr = %event.tested_addr,
         bytes_sent = event.bytes_sent,
         outcome,
-        "autonat: probe result"
+        "probe result"
     );
     emit(
         event_tx,
@@ -911,13 +914,13 @@ fn handle_relay_client(event: relay::client::Event) {
             renewal,
             ..
         } => {
-            info!(%relay_peer_id, renewal, "relay: reservation accepted");
+            y7ke_core::netlog!(info, Cat::Relay, %relay_peer_id, renewal, "reservation accepted");
         }
         relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
-            info!(%relay_peer_id, "relay: outbound circuit established");
+            y7ke_core::netlog!(info, Cat::Relay, %relay_peer_id, "outbound circuit established");
         }
         relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
-            info!(%src_peer_id, "relay: inbound circuit established");
+            y7ke_core::netlog!(info, Cat::Relay, %src_peer_id, "inbound circuit established");
         }
     }
 }
@@ -1277,6 +1280,36 @@ pub fn multiaddr_is_lan(addr: &Multiaddr) -> bool {
         }
     }
     false
+}
+
+/// Endpoint IP family for the `ip=` log field. Reads the first Ip4/Ip6
+/// BEFORE any `/p2p-circuit`. Returns "v4"/"v6"; "dns" for a DNS-only
+/// bootstrap addr; "relay" for a circuit (the family there is the RELAY
+/// hop, NOT the peer); "unknown" otherwise.
+///
+/// IPVERSION is diagnostic plumbing — the client binds IPv4-only
+/// (`DEFAULT_LISTEN_ADDR` / `DEFAULT_QUIC_LISTEN_ADDR`), so this reads "v4"
+/// for all current client connections; it is NOT evidence of a working IPv6
+/// data path until /ip6 listeners land.
+pub fn ip_version_str(addr: &Multiaddr) -> &'static str {
+    use libp2p::multiaddr::Protocol;
+    let mut seen_circuit = false;
+    for p in addr.iter() {
+        match p {
+            Protocol::P2pCircuit => seen_circuit = true,
+            Protocol::Ip4(_) if !seen_circuit => return "v4",
+            Protocol::Ip6(_) if !seen_circuit => return "v6",
+            Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_) if !seen_circuit => {
+                return "dns"
+            }
+            _ => {}
+        }
+    }
+    if seen_circuit {
+        "relay"
+    } else {
+        "unknown"
+    }
 }
 
 /// Build a libp2p `PeerId` from a Y7 identifier.
