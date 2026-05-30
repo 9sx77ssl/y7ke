@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// to BOTH a TCP and a QUIC multiaddr and races them (QUIC wins on
 /// UDP-open networks, enabling direct hole-punch; TCP is the fallback).
 pub const DEFAULT_RELAY_BOOTSTRAP: &str =
-    "/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo";
+    "/dns/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo";
 
 /// Expand a bootstrap descriptor into the multiaddr STRINGS to dial.
 ///
@@ -31,7 +31,7 @@ pub fn expand_bootstrap(s: &str) -> Vec<String> {
     // Leading '/' yields an empty first element: ["", net, host, port, "p2p", id].
     let parts: Vec<&str> = s.split('/').collect();
     let is_shorthand = parts.len() == 6
-        && matches!(parts[1], "dns4" | "dns6" | "ip4" | "ip6")
+        && matches!(parts[1], "dns" | "dns4" | "dns6" | "ip4" | "ip6")
         && !parts[2].is_empty()
         && !parts[3].is_empty()
         && parts[3].chars().all(|c| c.is_ascii_digit())
@@ -109,6 +109,27 @@ mod tests {
     #[test]
     fn ip4_shorthand_expands() {
         let v = expand_bootstrap("/ip4/89.35.130.67/4101/p2p/12D3KooWAaAa");
+        assert_eq!(v.len(), 2);
+        assert!(v[0].contains("/tcp/4101/"));
+        assert!(v[1].contains("/udp/4101/quic-v1/"));
+    }
+
+    #[test]
+    fn dns_family_agnostic_shorthand_expands() {
+        // `/dns` resolves both A and AAAA — the family-agnostic default.
+        let v = expand_bootstrap("/dns/bootstrap1.y7v.lol/4101/p2p/12D3KooWAaAa");
+        assert_eq!(
+            v,
+            vec![
+                "/dns/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWAaAa".to_string(),
+                "/dns/bootstrap1.y7v.lol/udp/4101/quic-v1/p2p/12D3KooWAaAa".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ip6_shorthand_expands() {
+        let v = expand_bootstrap("/ip6/2001:db8::1/4101/p2p/12D3KooWAaAa");
         assert_eq!(v.len(), 2);
         assert!(v[0].contains("/tcp/4101/"));
         assert!(v[1].contains("/udp/4101/quic-v1/"));

@@ -49,14 +49,20 @@ use crate::protocol::{HandshakeResp, MsgResp, SyncResp};
 // Transport-agnostic shorthand: the app layer expands it (via
 // `y7ke_core::expand_bootstrap`) into BOTH a TCP and a QUIC multiaddr.
 pub const DEFAULT_BOOTSTRAPS: &[&str] =
-    &["/dns4/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo"];
+    &["/dns/bootstrap1.y7v.lol/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo"];
 
 /// Default TCP listen address (random port on all interfaces).
 pub const DEFAULT_LISTEN_ADDR: &str = "/ip4/0.0.0.0/tcp/0";
+/// Best-effort IPv6 listeners (V2). A v6-disabled host fails to bind these;
+/// that is NORMAL and stays non-fatal. A global IPv6 address bypasses NAT
+/// entirely, so this is the cheapest path to a real direct connection — but
+/// it's inert until peers learn a v6 address (bootstrap AAAA pending).
+pub const DEFAULT_LISTEN_ADDR_V6: &str = "/ip6/::/tcp/0";
 
 /// Default QUIC (v1) listen address (random UDP port on all interfaces).
 /// V2-A6 — bound in parallel with the TCP listener.
 pub const DEFAULT_QUIC_LISTEN_ADDR: &str = "/ip4/0.0.0.0/udp/0/quic-v1";
+pub const DEFAULT_QUIC_LISTEN_ADDR_V6: &str = "/ip6/::/udp/0/quic-v1";
 
 /// Idle connection timeout. Connections with no active substream are
 /// dropped after this period.
@@ -152,6 +158,15 @@ pub fn spawn_swarm_with_bootstraps(
         let _ = event_tx.send(NetEvent::Error {
             message: format!("listen_on({DEFAULT_QUIC_LISTEN_ADDR}) failed: {e}"),
         });
+    }
+    // V2: best-effort IPv6 listeners (TCP + QUIC). A v6-disabled host fails
+    // here — that's NORMAL, so it stays a warn and does NOT emit
+    // NetEvent::Error (which would surface a false failure in the UI). IPv4
+    // carries on regardless.
+    for v6 in [DEFAULT_LISTEN_ADDR_V6, DEFAULT_QUIC_LISTEN_ADDR_V6] {
+        if let Err(e) = swarm.listen_on(v6.parse().expect("compile-time constant multiaddr")) {
+            warn!("IPv6 listener {v6} not started: {e} (continuing on IPv4)");
+        }
     }
 
     // Seed the Kad routing table from configured bootstraps. We always

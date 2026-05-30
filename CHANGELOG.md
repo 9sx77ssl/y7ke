@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.22] — 2026-05-30
+
+- feat(net): best-effort IPv6 listeners + /dns bootstrap shorthand + ::1 proof
+
 ## [3.0.21] — 2026-05-30
 
 - feat(provenance): first-class connection_origin end-to-end
