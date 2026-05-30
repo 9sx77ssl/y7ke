@@ -7,10 +7,12 @@ pub mod diagnostics;
 pub mod error;
 pub mod event;
 pub mod id;
+pub mod netlog;
 pub mod settings;
 pub mod status;
 
 pub use diagnostics::{ConnectionView, DcutrStats, DiagnosticsDetail, NatDetail, RateLimitDrops};
+pub use netlog::Cat;
 pub use error::{AppError, Result};
 pub use event::AppEvent;
 pub use id::{ConversationId, MessageId, Y7Id};

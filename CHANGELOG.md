@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.19] — 2026-05-30
+
+- feat(core): netlog category enum + macro for structured network logs
+
 ## [3.0.18] — 2026-05-30
 
 - docs: consolidate docs/ into a single truth-audited PLAN.md
