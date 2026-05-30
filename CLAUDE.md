@@ -9,7 +9,9 @@ code is the source of truth.
 Privacy-first peer-to-peer desktop messenger. End-to-end encrypted text
 messaging over libp2p; local-first SQLite; no accounts. See
 [`README.md`](README.md) for the user-facing pitch and
-[`docs/ROADMAP.md`](docs/ROADMAP.md) for direction.
+[`docs/PLAN.md`](docs/PLAN.md) — the single source of truth (architecture,
+milestone history, capability matrix with PROVEN/SIMULATED/UNVERIFIED/PLANNED
+tags, security model, roadmap).
 
 ## Layout
 
@@ -22,7 +24,7 @@ src-tauri              # Tauri 2 shell, command surface, event channel
 ui                     # Svelte 5 + Vite + TypeScript
 ui/src/lib/gen         # ts-rs-generated types (do not edit by hand)
 scripts/hooks          # git hooks (auto-bump version + CHANGELOG on commit)
-docs/                  # ARCHITECTURE, ROADMAP, LIVE_SMOKE (cross-NAT runbook)
+docs/PLAN.md           # single source of truth (arch, history, capability matrix, roadmap, live-smoke)
 ```
 
 ## Conventions

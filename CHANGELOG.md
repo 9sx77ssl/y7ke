@@ -7,6 +7,10 @@ subject; release tags pick up the matching section as the release body.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is [SemVer](https://semver.org/).
 
+## [3.0.18] — 2026-05-30
+
+- docs: consolidate docs/ into a single truth-audited PLAN.md
+
 ## [3.0.17] — 2026-05-29
 
 - docs: refresh CLAUDE.md — fix release-build command + 3.x architectural pins

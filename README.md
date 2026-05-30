@@ -9,8 +9,9 @@ Privacy-first, key-based, peer-to-peer desktop messenger.
 - **Local-first.** Messages persist in an encrypted SQLite database on disk.
 - **Offline-tolerant.** Undelivered messages queue locally and drain on reconnect; an explicit `/y7ke/sync/1.0.0` reconcile catches anything the queue lost.
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the live plan and
-[`CHANGELOG.md`](CHANGELOG.md) for what shipped per version.
+See [`docs/PLAN.md`](docs/PLAN.md) for the single source of truth (architecture,
+milestone history, capability matrix, roadmap) and [`CHANGELOG.md`](CHANGELOG.md)
+for what shipped per version.
 
 ## Building from source
 
@@ -243,8 +244,10 @@ diagnostics snapshot.
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — implementation architecture
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and what's next
+- [`docs/PLAN.md`](docs/PLAN.md) — single source of truth: architecture,
+  milestone history, capability matrix (PROVEN/SIMULATED/UNVERIFIED/PLANNED),
+  security model, transport stack, known limitations, roadmap, and the live
+  cross-NAT smoke procedure
 - [`CHANGELOG.md`](CHANGELOG.md) — per-version diff
 
 ## License
